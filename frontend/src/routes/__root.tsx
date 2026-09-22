@@ -11,7 +11,6 @@ import { useEffect, type ReactNode } from "react";
 import { LangProvider } from "@/components/app/lang";
 import { AuthProvider } from "@/lib/auth";
 import { ThemeProvider } from "@/components/app/theme";
-import { AmbientAudioPlayer } from "@/components/app/ambient-audio";
 import { GoogleOAuthProvider } from "@react-oauth/google";
 
 const GOOGLE_CLIENT_ID =
@@ -146,8 +145,6 @@ function RootComponent() {
         <AuthProvider>
           <ThemeProvider>
             <LangProvider>
-              {/* Global Ambient Audio Track for Spark.mp3 across all routes */}
-              <AmbientAudioPlayer />
               {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
               <Outlet />
             </LangProvider>
