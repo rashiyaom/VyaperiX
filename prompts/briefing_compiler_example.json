@@ -1,0 +1,146 @@
+{
+  "company_name": "Apex Cloud Systems",
+  "one_line_summary": "Enterprise cloud security and automated compliance monitoring platform for mid-market financial institutions.",
+  "industry": "Cybersecurity / FinTech",
+  "value_proposition": "Continuous zero-trust posture monitoring and audit-ready regulatory reporting delivered in real-time.",
+  "opportunity_score": 88,
+  "confidence_score": 92,
+  "confidence_notes": "High confidence intelligence synthesized from website product taxonomy, API specifications, customer case studies, and compliance certifications.",
+  "executive_summary": {
+    "core_thesis": "Apex Cloud Systems has a robust SOC 2 compliant architecture with high expansion potential in Tier-2 regional banks.",
+    "key_strengths": [
+      "SOC 2 Type II and ISO 27001 certified core architecture",
+      "Native zero-latency telemetry integrations for AWS and Azure",
+      "Rapid time-to-value with sub-30-minute agentless onboarding"
+    ],
+    "primary_vulnerabilities": [
+      "Limited self-serve tier or transparent pricing on inbound website",
+      "No automated outbound voice agent or qualification workflow"
+    ],
+    "immediate_action_items": [
+      "Deploy Vyepari X autonomous voice agent for inbound demo triage",
+      "Publish interactive compliance ROI estimator on core landing page"
+    ]
+  },
+  "target_customers": [
+    {
+      "segment_name": "Regional Banks & Credit Unions",
+      "description": "Financial entities navigating strict FFIEC and GLBA audits with constrained internal SecOps teams.",
+      "pain_points": [
+        "Manual audit preparation cycles exceeding 120 hours",
+        "Staff fatigue managing fragmented multi-cloud security telemetry"
+      ],
+      "estimated_tam": "$1.4B"
+    },
+    {
+      "segment_name": "FinTech Scaleups (Series B+)",
+      "description": "Fast-growing financial applications needing continuous compliance verification to close enterprise deals.",
+      "pain_points": [
+        "Enterprise procurement friction due to vendor security reviews",
+        "Lack of dedicated GRC (Governance, Risk, Compliance) staff"
+      ],
+      "estimated_tam": "$850M"
+    }
+  ],
+  "products_services": [
+    {
+      "name": "CloudAudit Real-Time Telemetry",
+      "description": "Continuous cloud asset discovery and configuration drift detection across hybrid environments.",
+      "pricing_model": "Annual subscription based on monitored cloud assets"
+    },
+    {
+      "name": "AuditVault 1-Click Evidence Packager",
+      "description": "Automated snapshot generation and evidence collection mapped directly to SOC 2, HIPAA, and PCI-DSS.",
+      "pricing_model": "Included in Enterprise tier"
+    }
+  ],
+  "current_marketing_channels": [
+    {
+      "channel": "Inbound Organic Search",
+      "evidence": "Extensive blog posts and whitepapers targeting cloud compliance search queries."
+    },
+    {
+      "channel": "Industry Conferences & Events",
+      "evidence": "Sponsorship presence at RSA and FinTech Connect."
+    }
+  ],
+  "competitor_signals": [
+    {
+      "competitor": "Vanta",
+      "strengths": "Strong brand awareness in early-stage startups and automated questionnaires.",
+      "weaknesses": "Lower depth in hybrid banking and on-premise legacy connectors."
+    },
+    {
+      "competitor": "Drata",
+      "strengths": "Extensive auditor network and automated evidence collection.",
+      "weaknesses": "Premium enterprise pricing with lengthy custom onboarding."
+    }
+  ],
+  "marketing_gaps": [
+    "No dynamic voice SDR handling after-hours demo requests",
+    "Missing clear self-assessment benchmark calculator on marketing homepage",
+    "Customer testimonials lack quantitative efficiency metrics"
+  ],
+  "swot_analysis": {
+    "strengths": [
+      "Strong technical moat in banking-grade compliance automation",
+      "Deep integrations with major public cloud providers"
+    ],
+    "weaknesses": [
+      "High reliance on high-touch enterprise sales cycles",
+      "Underutilized outbound telephony and multi-channel prospecting"
+    ],
+    "opportunities": [
+      "Expanding into EU market for DORA (Digital Operational Resilience Act) compliance",
+      "Deploying autonomous AI voice qualification agents to cut demo drop-off"
+    ],
+    "threats": [
+      "Aggressive price competition from bundled cloud-native security offerings"
+    ]
+  },
+  "recommendations": [
+    {
+      "title": "Deploy Vyepari X Autonomous Voice SDR",
+      "description": "Trigger automated instant voice outreach to prospects within 60 seconds of enterprise whitepaper download.",
+      "impact": "High",
+      "timeframe": "1-2 weeks",
+      "expected_roi": "+35% demo conversion velocity",
+      "action_steps": [
+        "Configure Vapi telephony webhook with custom Sarvam voice model",
+        "Ingest CloudAudit product collateral into Vyepari X RAG knowledge base",
+        "Activate automated CRM handoff for high-intent prospect calls"
+      ]
+    },
+    {
+      "title": "Publish Interactive Compliance Readiness Index",
+      "description": "Create a lightweight self-serve tool generating personalized compliance gap scores in exchange for business email.",
+      "impact": "Medium",
+      "timeframe": "2-3 weeks",
+      "expected_roi": "+50% inbound lead capture",
+      "action_steps": [
+        "Define 10-question compliance maturity benchmark",
+        "Connect lead submission form to automated dossier compiler"
+      ]
+    }
+  ],
+  "conversion_funnel": [
+    { "stage": "Website Visitors", "count": 12000, "conversion_rate": "100%" },
+    { "stage": "Whitepaper / Asset Leads", "count": 1450, "conversion_rate": "12.1%" },
+    { "stage": "Qualified Demos (Voice SDR)", "count": 480, "conversion_rate": "33.1%" },
+    { "stage": "Proof of Concept / Pilot", "count": 140, "conversion_rate": "29.2%" },
+    { "stage": "Closed Won Enterprise", "count": 52, "conversion_rate": "37.1%" }
+  ],
+  "growth_forecast": [
+    { "period": "Q1 2026", "projected_mrr": "$125,000", "growth_rate": "15%" },
+    { "period": "Q2 2026", "projected_mrr": "$165,000", "growth_rate": "32%" },
+    { "period": "Q3 2026", "projected_mrr": "$220,000", "growth_rate": "33%" },
+    { "period": "Q4 2026", "projected_mrr": "$310,000", "growth_rate": "41%" }
+  ],
+  "timeline_roadmap": [
+    { "phase": "Phase 1: Ingestion & Telephony Setup", "duration": "Days 1-7", "milestone": "Vapi agent & RAG pipeline operational" },
+    { "phase": "Phase 2: Inbound Traffic Funnel Integration", "duration": "Days 8-14", "milestone": "Live automated demo booking" },
+    { "phase": "Phase 3: Outbound Cadence & Intelligence Dossiers", "duration": "Days 15-30", "milestone": "Continuous multi-channel pipeline acceleration" }
+  ],
+  "data_source_mode": "website_inferred",
+  "data_source_summary": "Synthesized from corporate domain assets, product documentation, and industry benchmarks."
+}

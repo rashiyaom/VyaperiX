@@ -1,0 +1,11 @@
+﻿{
+    "mode":  "light",
+    "height":  1440,
+    "format":  "webp",
+    "compressionQuality":  92,
+    "filePattern":  "frame_%04d.webp",
+    "totalFrames":  240,
+    "fps":  24,
+    "generatedAt":  "2026-09-20T16:13:40.6492903+05:30",
+    "width":  2560
+}
