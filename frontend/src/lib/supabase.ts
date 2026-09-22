@@ -18,19 +18,30 @@ const envKey =
   "";
 export const SUPABASE_PUBLISHABLE_KEY: string = envKey.trim();
 
+const FALLBACK_URL = "https://placeholder-project.supabase.co";
+const FALLBACK_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.placeholder";
+
 export const isSupabaseConfigured =
   Boolean(SUPABASE_URL) &&
+  !SUPABASE_URL.includes("your_project") &&
   !SUPABASE_URL.includes("your-project") &&
-  Boolean(SUPABASE_PUBLISHABLE_KEY);
+  !SUPABASE_URL.includes("placeholder-project") &&
+  Boolean(SUPABASE_PUBLISHABLE_KEY) &&
+  SUPABASE_PUBLISHABLE_KEY !== FALLBACK_KEY &&
+  !SUPABASE_PUBLISHABLE_KEY.includes("your_supabase");
 
-export const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: true,
-    storageKey: "vyepari_x_auth_token",
-  },
-});
+export const supabase = createClient(
+  SUPABASE_URL || FALLBACK_URL,
+  SUPABASE_PUBLISHABLE_KEY || FALLBACK_KEY,
+  {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+      storageKey: "vyepari_x_auth_token",
+    },
+  }
+);
 
 export async function getCurrentSession() {
   const { data, error } = await supabase.auth.getSession();

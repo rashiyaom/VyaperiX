@@ -132,12 +132,14 @@ export function VideoMeetingModule({
   const [activeModalTab, setActiveModalTab] = useState<"transcript" | "analysis">("analysis");
   const [copiedTranscript, setCopiedTranscript] = useState(false);
   const [checkedActionItems, setCheckedActionItems] = useState<Record<string, boolean>>({});
+  const [syncingMeeting, setSyncingMeeting] = useState(false);
 
   // Auth Header helper
   const getAuthHeaders = () => {
     const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (session?.access_token) {
-      headers["Authorization"] = `Bearer ${session.access_token}`;
+    const token = session?.access_token || (typeof window !== "undefined" ? localStorage.getItem("vyepari_x_auth_token") : null);
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
     }
     return headers;
   };
@@ -193,12 +195,63 @@ export function VideoMeetingModule({
     }
   };
 
+  // Fetch single fresh meeting details (for modal or updating a card)
+  const fetchMeetingDetails = async (id: string, updateModalTab = false) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/video/meetings/${id}`, {
+        headers: getAuthHeaders(),
+      });
+      if (res.ok) {
+        const freshCall = await res.json();
+        setSelectedMeeting(freshCall);
+        setMeetings((prev) => prev.map((m) => (m.id === freshCall.id ? freshCall : m)));
+        if (updateModalTab && freshCall.analysis) {
+          setActiveModalTab("analysis");
+        }
+        return freshCall;
+      }
+    } catch (err) {
+      console.warn("Failed to fetch fresh call details", err);
+    }
+    return null;
+  };
+
+  // Open modal and immediately query backend for fresh transcript/analysis
+  const handleOpenDetailModal = (call: VideoCallRecord) => {
+    setSelectedMeeting(call);
+    setActiveModalTab(call.analysis ? "analysis" : "transcript");
+    fetchMeetingDetails(call.id, true);
+  };
+
+  // Force active sync from Tavus
+  const handleSyncMeeting = async (id: string) => {
+    setSyncingMeeting(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/video/meetings/${id}/sync`, {
+        method: "POST",
+        headers: getAuthHeaders(),
+      });
+      if (res.ok) {
+        const freshCall = await res.json();
+        setSelectedMeeting(freshCall);
+        setMeetings((prev) => prev.map((m) => (m.id === freshCall.id ? freshCall : m)));
+        if (freshCall.analysis) {
+          setActiveModalTab("analysis");
+        }
+      }
+    } catch (err) {
+      console.warn("Sync failed", err);
+    } finally {
+      setSyncingMeeting(false);
+    }
+  };
+
   // Auto-fetch on tab change or mount
   useEffect(() => {
     fetchMeetings();
   }, [activeTab]);
 
-  // Auto-refresh when any meeting is in 'analyzing' status to track Groq completion
+  // Auto-refresh list when any meeting is in 'analyzing' status to track Groq completion
   useEffect(() => {
     const hasAnalyzing = meetings.some((m) => m.status === "analyzing");
     if (!hasAnalyzing) return;
@@ -209,6 +262,34 @@ export function VideoMeetingModule({
 
     return () => clearInterval(interval);
   }, [meetings]);
+
+  // Auto-poll when modal is open and meeting is analyzing or missing transcript
+  useEffect(() => {
+    if (!selectedMeeting) return;
+    const needsPolling =
+      selectedMeeting.status === "analyzing" ||
+      (selectedMeeting.status === "ended" &&
+        (!selectedMeeting.transcript || selectedMeeting.transcript.length === 0 || !selectedMeeting.analysis));
+
+    if (!needsPolling) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/video/meetings/${selectedMeeting.id}`, {
+          headers: getAuthHeaders(),
+        });
+        if (res.ok) {
+          const updated = await res.json();
+          setSelectedMeeting(updated);
+          setMeetings((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
+        }
+      } catch {
+        // Ignore
+      }
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [selectedMeeting?.id, selectedMeeting?.status, selectedMeeting?.transcript?.length, selectedMeeting?.analysis]);
 
   // Format Duration helper
   const formatDuration = (secs?: number) => {
@@ -756,10 +837,7 @@ export function VideoMeetingModule({
                     <div className="flex items-center gap-2 shrink-0">
                       <button
                         type="button"
-                        onClick={() => {
-                          setSelectedMeeting(call);
-                          setActiveModalTab(call.analysis ? "analysis" : "transcript");
-                        }}
+                        onClick={() => handleOpenDetailModal(call)}
                         className="border border-ink/20 bg-paper hover:border-violet hover:text-violet px-3.5 py-1.5 font-mono text-xs font-bold text-ink transition-all flex items-center gap-1.5 shadow-sm"
                       >
                         <MessageSquare className="w-3.5 h-3.5" />
@@ -808,13 +886,25 @@ export function VideoMeetingModule({
                 </p>
               </div>
 
-              <button
-                type="button"
-                onClick={() => setSelectedMeeting(null)}
-                className="border border-ink/20 p-1.5 hover:bg-danger hover:text-paper transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleSyncMeeting(selectedMeeting.id)}
+                  disabled={syncingMeeting}
+                  className="border border-ink/20 bg-paper hover:border-violet hover:text-violet px-3 py-1.5 font-mono text-xs font-bold text-ink transition-all flex items-center gap-1.5 shadow-sm disabled:opacity-50"
+                  title="Fetch latest transcript turns and AI review from Tavus"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${syncingMeeting ? "animate-spin text-violet" : ""}`} />
+                  {syncingMeeting ? "Syncing..." : "Sync with Tavus"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedMeeting(null)}
+                  className="border border-ink/20 p-1.5 hover:bg-danger hover:text-paper transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
             {/* Modal Tabs */}

@@ -25,8 +25,6 @@ FALLBACK_MODELS = [
     os.environ.get("GROQ_MODEL"),
     "openai/gpt-oss-120b",
     "openai/gpt-oss-20b",
-    "groq/compound",
-    "groq/compound-mini",
     "qwen/qwen3.8-27b",
 ]
 PREFERRED_MODELS = [m for i, m in enumerate(FALLBACK_MODELS) if m and m not in FALLBACK_MODELS[:i]]
@@ -522,6 +520,83 @@ JSON SCHEMA STRUCTURE:
 Return raw JSON only.
 """
 
+
+def _truncate_text_for_groq(text: str, max_chars: int = 14000) -> str:
+    """Safely truncates text so Groq does not exceed its 7000-8000 Token-Per-Minute rate limit."""
+    if not text or len(text) <= max_chars:
+        return text
+    # Keep the first 10,000 chars (intro, products, pricing) and the last 4,000 chars (conclusions/recent data)
+    return (
+        f"{text[:10000]}\n\n"
+        f"--- [Dossier excerpted to fit Groq token rate limits — remaining {len(text) - 14000} characters omitted] ---\n\n"
+        f"{text[-4000:]}"
+    )
+
+
+def _synthesize_with_gemini(
+    user_prompt: str,
+    individual_doc_insights: list[DocumentInsight] | None = None,
+    data_engine_figures: dict | None = None,
+) -> BusinessAnalysis | None:
+    gemini_key = (os.environ.get("GEMINI_API_KEY") or "").strip()
+    if not gemini_key:
+        return None
+    try:
+        from google import genai
+        client = genai.Client(api_key=gemini_key)
+        configured_model = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
+        models_to_try = [configured_model, "gemini-2.5-flash"]
+        seen = set()
+        models_to_try = [m for m in models_to_try if m and not (m in seen or seen.add(m))]
+
+        prompt_content = f"{GLOBAL_SYNTHESIS_PROMPT}\n\n{user_prompt}\n\nReturn ONLY valid JSON matching the schema."
+
+        resp = None
+        for m in models_to_try:
+            try:
+                logger.info(f"Synthesizing business intelligence with Gemini ({m})...")
+                resp = client.models.generate_content(
+                    model=m,
+                    contents=prompt_content,
+                    config={"response_mime_type": "application/json"}
+                )
+                if resp and resp.text:
+                    logger.info(f"Gemini synthesis succeeded with model {m} ✓")
+                    break
+            except Exception as g_err:
+                logger.warning(f"Gemini synthesis with model {m} failed: {g_err}")
+                continue
+
+        if not resp or not resp.text:
+            return None
+
+        raw = _strip_json_fences(resp.text)
+        data = json.loads(raw)
+
+        if individual_doc_insights:
+            data["document_insights"] = [d.model_dump() for d in individual_doc_insights]
+
+        if data_engine_figures:
+            data["data_source_mode"] = data_engine_figures.get("data_source_mode", "website_inferred")
+            data["data_source_summary"] = data_engine_figures.get("data_source_summary", "")
+            data["growth_forecast"] = data_engine_figures.get("growth_forecast") or []
+            data["conversion_funnel"] = data_engine_figures.get("conversion_funnel") or []
+            if data_engine_figures.get("timeline_roadmap"):
+                data["timeline_roadmap"] = data_engine_figures["timeline_roadmap"]
+            if data_engine_figures.get("financial_highlights"):
+                existing_fins = data.get("financial_highlights") or []
+                file_fins = data_engine_figures["financial_highlights"]
+                file_names = {f["metric_name"] for f in file_fins if isinstance(f, dict)}
+                data["financial_highlights"] = file_fins + [
+                    f for f in existing_fins if (isinstance(f, dict) and f.get("metric_name") not in file_names)
+                ]
+
+        return BusinessAnalysis.model_validate(data)
+    except Exception as e:
+        logger.warning(f"Gemini synthesis failed: {e}")
+        return None
+
+
 def analyze_business(
     profile_markdown: str,
     linkedin_url: str | None = None,
@@ -532,8 +607,6 @@ def analyze_business(
     model: str | None = None,
     rag_context: str | None = None,
 ) -> BusinessAnalysis:
-    client = _get_client()
-
     file_note = ""
     if data_engine_figures and data_engine_figures.get("has_file_data"):
         file_note = f"""
@@ -556,7 +629,7 @@ Incorporate these exact numbers into the executive summary, SWOT, and tactical r
         content_note = "NOTE: Full scraped profile dossier provided below."
         logger.info("analyze_business: Using full profile markdown for synthesis (fallback mode)")
 
-    user_prompt = f"""DOSSIER WITH {doc_count} ATTACHED DOCUMENTS & WEB ASSETS:
+    full_user_prompt = f"""DOSSIER WITH {doc_count} ATTACHED DOCUMENTS & WEB ASSETS:
 ================================================================================
 {content_note}
 
@@ -579,9 +652,49 @@ CRITICAL INSTRUCTIONS:
 Return ONLY valid JSON matching the schema.
 """
 
+    # If the dossier is large (> 16,000 chars / ~4,000 tokens), Groq on-demand will exceed
+    # its 7,000-8,000 TPM limit (Error 413).
+    # Gemini has a 1,000,000 token context window, so try Gemini first with the FULL dossier!
+    if len(primary_content) > 16000 and os.environ.get("GEMINI_API_KEY"):
+        logger.info(f"Dossier is large ({len(primary_content)} chars). Utilizing Gemini with 1M context window...")
+        gemini_result = _synthesize_with_gemini(
+            user_prompt=full_user_prompt,
+            individual_doc_insights=individual_doc_insights,
+            data_engine_figures=data_engine_figures,
+        )
+        if gemini_result:
+            return gemini_result
+        logger.warning("Gemini primary large-dossier synthesis did not succeed; falling back to truncated Groq synthesis.")
+
+    # Prepare safe truncated prompt for Groq to guarantee no 413 rate limit error
+    groq_content = _truncate_text_for_groq(primary_content, max_chars=14000)
+    groq_user_prompt = f"""DOSSIER WITH {doc_count} ATTACHED DOCUMENTS & WEB ASSETS:
+================================================================================
+{content_note}
+
+{groq_content}
+================================================================================
+{file_note}
+CRITICAL INSTRUCTIONS:
+1. Populate EVERY section in the JSON schema with concrete, high-precision findings derived from the dossier:
+   - target_customers (3-5 specific buyer personas with estimated deal size and pain points)
+   - products_services (3-6 specific products/services extracted from the dossier with differentiators and pricing)
+   - current_marketing_channels (3-5 channels with evidence and strength)
+   - swot_analysis (at least 3-4 distinct bullets in EACH quadrant: strengths, weaknesses, opportunities, threats)
+   - recommendations (4-6 prioritized playbooks with clear action steps, timeframe, and expected ROI)
+   - growth_forecast: STRICT GROUND TRUTH: ONLY populate if exact numerical time-series revenue ledgers are present in the dossier. If no verified financial ledger exists, return [] (empty list). NEVER invent or simulate revenue figures.
+   - conversion_funnel: STRICT GROUND TRUTH: ONLY populate if actual stage/pipeline records are present in the dossier. If no stage records exist, return [] (empty list). NEVER invent pipeline stages.
+   - timeline_roadmap: MUST provide exactly 4 distinct execution phases (Days 0–30, Days 30–60, Days 60–90, Days 90–180) with measurable target_metric and 3 actionable deliverables tailored to their catalog
+   - financial_highlights: 3-5 concrete commercial and financial metrics
+2. Calculate opportunity_score (0-100) and confidence_score (75-98) dynamically based on the company's upside and evidence depth.
+
+Return ONLY valid JSON matching the schema.
+"""
+
+    client = _get_client()
     messages: Any = [
         {"role": "system", "content": GLOBAL_SYNTHESIS_PROMPT},
-        {"role": "user", "content": user_prompt},
+        {"role": "user", "content": groq_user_prompt},
     ]
 
     candidate_models = PREFERRED_MODELS.copy()
@@ -653,4 +766,14 @@ Return ONLY valid JSON matching the schema.
             last_error = api_err
             continue
 
-    raise RuntimeError(f"Groq API failed on all candidate models: {last_error}")
+    # Fallback to Gemini if Groq exhausted all candidate models
+    logger.warning(f"Groq API failed on all candidate models ({last_error}). Attempting Gemini fallback...")
+    gemini_result = _synthesize_with_gemini(
+        user_prompt=full_user_prompt,
+        individual_doc_insights=individual_doc_insights,
+        data_engine_figures=data_engine_figures,
+    )
+    if gemini_result:
+        return gemini_result
+
+    raise RuntimeError(f"Both Groq and Gemini API failed to synthesize report. Groq error: {last_error}")
