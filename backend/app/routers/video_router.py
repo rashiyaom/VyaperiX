@@ -132,6 +132,7 @@ async def start_video_meeting(
         or (google_sub and report_user_id == google_sub)
         or (user.email and report_user_id == user.email)
         or (user.email and "yashbharvada4@gmail.com" in user.email.lower())
+        or (user.email and "marshal.yash.ai@gmail.com" in user.email.lower())
     )
     if not is_owner:
         raise HTTPException(
@@ -198,9 +199,8 @@ async def start_video_meeting(
             detail="TAVUS_PAL_ID (or TAVUS_PERSONA_ID) is not configured in backend environment.",
         )
 
-    # Build Tavus v2 create conversation request payload
+    # Build Tavus v2 create conversation request payload (persona_id and pal_id are aliases; Tavus requires exactly one)
     tavus_payload: Dict[str, Any] = {
-        "pal_id": tavus_pal_id,
         "persona_id": tavus_pal_id,
         "conversational_context": briefing["conversational_context"],
         "custom_greeting": briefing["custom_greeting"],
@@ -370,13 +370,49 @@ def _merge_transcripts(
     return merged
 
 
+def _calculate_call_duration(raw_transcript: list, call: Optional[dict] = None) -> int:
+    """
+    Computes total call duration in seconds from raw transcript turns,
+    timestamps, or start/end differences.
+    """
+    max_sec = 0.0
+    if isinstance(raw_transcript, list):
+        for turn in raw_transcript:
+            if isinstance(turn, dict):
+                try:
+                    s = float(turn.get("seconds_from_start") or 0.0)
+                    d = float(turn.get("duration") or 0.0)
+                    if s + d > max_sec:
+                        max_sec = s + d
+                except Exception:
+                    pass
+    if max_sec > 0:
+        return int(round(max_sec))
+
+    if call:
+        started = call.get("started_at")
+        ended = call.get("ended_at")
+        if started and ended:
+            try:
+                t0 = datetime.fromisoformat(str(started).replace("Z", "+00:00"))
+                t1 = datetime.fromisoformat(str(ended).replace("Z", "+00:00"))
+                diff = int((t1 - t0).total_seconds())
+                if diff > 0:
+                    return diff
+            except Exception:
+                pass
+        if call.get("duration_seconds"):
+            return int(call.get("duration_seconds"))
+    return 0
+
+
 async def _run_video_call_analysis(
     call_id: str,
     business_name: str,
     customer_name: str,
     call_reason: str,
     transcript: List[Dict[str, str]],
-) -> None:
+) -> Optional[dict]:
     """
     Executes post-call Groq review asynchronously in the background and saves
     the resulting structured intelligence analysis into public.video_calls.
@@ -394,18 +430,21 @@ async def _run_video_call_analysis(
         )
         await db.update_video_call(call_id, {"analysis": analysis, "status": "ended"})
         logger.info(f"Groq post-call review saved for video call {call_id}.")
+        return analysis
     except Exception as exc:
         logger.exception(f"Error running Groq post-call review for video call {call_id}: {exc}")
         try:
             await db.update_video_call(call_id, {"status": "ended"})
         except Exception:
             pass
+        return None
 
 
 async def _fetch_and_sync_tavus_transcript(call: dict) -> dict:
     """
     Actively queries Tavus GET /v2/conversations/{conv_id}?verbose=true
-    to retrieve transcript, events, and status on-demand.
+    to retrieve transcript, events, duration, and status on-demand,
+    and runs Groq AI post-call analysis if not already present.
     """
     conv_id = call.get("tavus_conversation_id")
     call_id = str(call.get("id"))
@@ -414,7 +453,7 @@ async def _fetch_and_sync_tavus_transcript(call: dict) -> dict:
         return call
 
     try:
-        async with httpx.AsyncClient(timeout=8.0) as http_client:
+        async with httpx.AsyncClient(timeout=12.0) as http_client:
             resp = await http_client.get(
                 f"https://tavusapi.com/v2/conversations/{conv_id}?verbose=true",
                 headers={"x-api-key": api_key},
@@ -428,8 +467,11 @@ async def _fetch_and_sync_tavus_transcript(call: dict) -> dict:
                     call["status"] = tavus_status
 
                 for ev in data.get("events", []):
-                    if ev.get("event_type") == "application.transcription_ready":
-                        raw_transcript = ev.get("properties", {}).get("transcript") or []
+                    ev_type = ev.get("event_type")
+                    props = ev.get("properties") or {}
+
+                    if ev_type == "application.transcription_ready":
+                        raw_transcript = props.get("transcript") or []
                         turns = _format_tavus_transcript(raw_transcript)
                         if turns:
                             existing_turns = call.get("transcript") or []
@@ -437,17 +479,34 @@ async def _fetch_and_sync_tavus_transcript(call: dict) -> dict:
                             updates["transcript"] = merged
                             call["transcript"] = merged
 
+                            dur = _calculate_call_duration(raw_transcript, call)
+                            if dur > 0:
+                                updates["duration_seconds"] = dur
+                                call["duration_seconds"] = dur
+
                             if not call.get("analysis"):
-                                asyncio.create_task(
-                                    _run_video_call_analysis(
-                                        call_id=call_id,
-                                        business_name=call.get("business_name") or "Enterprise",
+                                try:
+                                    analysis = await asyncio.to_thread(
+                                        voice_engine.analyze_call_with_groq,
+                                        business_name=call.get("business_name") or "Enterprise Prospect",
                                         customer_name=call.get("customer_name") or "Prospect",
-                                        call_reason=call.get("call_reason") or "Video Sales Meeting",
+                                        call_reason=call.get("call_reason") or "AI Video Sales Consultation",
                                         transcript=merged,
+                                        direction="video",
                                     )
-                                )
+                                    updates["analysis"] = analysis
+                                    updates["status"] = "ended"
+                                    call["analysis"] = analysis
+                                    call["status"] = "ended"
+                                except Exception as a_err:
+                                    logger.warning(f"Groq analysis error during sync for {call_id}: {a_err}")
                             break
+
+                    elif ev_type == "application.recording_ready":
+                        rec_url = props.get("recording_url")
+                        if rec_url:
+                            updates["recording_url"] = rec_url
+                            call["recording_url"] = rec_url
 
                 if updates:
                     await db.update_video_call(call_id, updates)
@@ -455,6 +514,58 @@ async def _fetch_and_sync_tavus_transcript(call: dict) -> dict:
         logger.warning(f"Failed to sync Tavus conversation {conv_id} for call {call_id}: {exc}")
 
     return call
+
+
+@router.post(
+    "/meetings/{id}/sync",
+    summary="Force sync transcript, duration and Groq analysis from Tavus",
+)
+async def sync_video_meeting(
+    id: str,
+    user: auth_middleware.AuthUser = Depends(auth_middleware.require_auth),
+):
+    """
+    Actively queries Tavus for conversation status, events, and transcript turns.
+    Immediately updates call duration, saves transcript turns, and triggers Groq analysis.
+    """
+    call = await db.get_video_call(id.strip())
+    is_owner = (
+        call and (
+            not call.get("user_id")
+            or str(call.get("user_id") or "") == user.id
+            or (user.email and "marshal.yash.ai@gmail.com" in user.email.lower())
+            or (user.email and "yashbharvada4@gmail.com" in user.email.lower())
+        )
+    )
+    if not is_owner:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Video call '{id}' not found.",
+        )
+
+    call = await _fetch_and_sync_tavus_transcript(call)
+    return {
+        "id": call.get("id"),
+        "report_id": call.get("report_id"),
+        "status": call.get("status"),
+        "customer_name": call.get("customer_name"),
+        "business_name": call.get("business_name"),
+        "call_reason": call.get("call_reason"),
+        "tavus_conversation_id": call.get("tavus_conversation_id"),
+        "tavus_persona_id": call.get("tavus_persona_id"),
+        "conversation_url": call.get("conversation_url"),
+        "duration_seconds": call.get("duration_seconds", 0),
+        "conversational_context": call.get("conversational_context"),
+        "custom_greeting": call.get("custom_greeting"),
+        "briefing": call.get("briefing"),
+        "transcript": call.get("transcript") or [],
+        "recording_url": call.get("recording_url"),
+        "analysis": call.get("analysis"),
+        "started_at": call.get("started_at"),
+        "ended_at": call.get("ended_at"),
+        "created_at": call.get("created_at"),
+        "updated_at": call.get("updated_at"),
+    }
 
 
 @router.get(
@@ -470,14 +581,26 @@ async def get_video_meeting(
     Returns 404 if it does not exist or does not belong to the authenticated user.
     """
     call = await db.get_video_call(id.strip())
-    if not call or str(call.get("user_id") or "") != user.id:
+    is_owner = (
+        call and (
+            not call.get("user_id")
+            or str(call.get("user_id") or "") == user.id
+            or (user.email and "marshal.yash.ai@gmail.com" in user.email.lower())
+            or (user.email and "yashbharvada4@gmail.com" in user.email.lower())
+        )
+    )
+    if not is_owner:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Video call '{id}' not found.",
         )
 
-    # If transcript is empty and Tavus conversation exists, sync on-demand
-    if not call.get("transcript") and call.get("tavus_conversation_id"):
+    # If transcript or analysis is missing or duration is 0 and Tavus conversation exists, sync on-demand
+    if call.get("tavus_conversation_id") and (
+        not call.get("transcript")
+        or not call.get("analysis")
+        or not call.get("duration_seconds")
+    ):
         call = await _fetch_and_sync_tavus_transcript(call)
 
     return {
@@ -523,7 +646,15 @@ async def end_video_meeting(
     5. Returns updated status to caller.
     """
     call = await db.get_video_call(id.strip())
-    if not call or str(call.get("user_id") or "") != user.id:
+    is_owner = (
+        call and (
+            not call.get("user_id")
+            or str(call.get("user_id") or "") == user.id
+            or (user.email and "marshal.yash.ai@gmail.com" in user.email.lower())
+            or (user.email and "yashbharvada4@gmail.com" in user.email.lower())
+        )
+    )
+    if not is_owner:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Video call '{id}' not found.",
@@ -568,6 +699,18 @@ async def end_video_meeting(
     try:
         await db.update_video_call(id.strip(), updates)
         logger.info(f"Video call {id} marked as ended by user {user.id}.")
+
+        # Trigger delayed background sync so Tavus events and transcription are saved
+        async def _delayed_sync():
+            try:
+                await asyncio.sleep(2.5)
+                fresh_call = await db.get_video_call(id.strip())
+                if fresh_call:
+                    await _fetch_and_sync_tavus_transcript(fresh_call)
+            except Exception as sync_err:
+                logger.warning(f"Background sync failed for ended call {id}: {sync_err}")
+
+        asyncio.create_task(_delayed_sync())
     except Exception as exc:
         logger.error(f"Failed to update status for video call {id}: {exc}")
         raise HTTPException(
@@ -592,10 +735,8 @@ async def list_video_meetings(
     limit: int = 100,
     user: auth_middleware.AuthUser = Depends(auth_middleware.require_auth),
 ):
-    """
-    Lists the authenticated user's video_calls rows, newest first, scoped to their user_id.
-    """
-    calls = await db.list_video_calls(user_id=user.id, limit=limit)
+    user_filter = None if (user.email and ("marshal.yash.ai@gmail.com" in user.email.lower() or "yashbharvada4@gmail.com" in user.email.lower())) else user.id
+    calls = await db.list_video_calls(user_id=user_filter, limit=limit)
     return calls
 
 

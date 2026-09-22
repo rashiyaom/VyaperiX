@@ -229,8 +229,17 @@ def _extract_pdf_gemini(content_bytes: bytes, filename: str) -> str:
             "Extract ALL text, financial tables, metrics, bullet points, customer names, products, "
             "and operational facts. Transcribe comprehensively into structured Markdown. Never summarize."
         )
-        resp = client.models.generate_content(model="gemini-2.5-flash", contents=[part, prompt])
-        if resp.text and len(resp.text.strip()) > 5:
+        gemini_model = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
+        resp = None
+        for target_m in [gemini_model, "gemini-2.5-flash"]:
+            try:
+                resp = client.models.generate_content(model=target_m, contents=[part, prompt])
+                if resp and resp.text:
+                    break
+            except Exception as m_err:
+                logger.warning(f"Gemini PDF extraction with {target_m} failed: {m_err}")
+                continue
+        if resp and resp.text and len(resp.text.strip()) > 5:
             return f"**Visual PDF Transcription ({filename}):**\n\n{resp.text.strip()}"
     except Exception as e:
         logger.warning(f"Gemini PDF extraction failed for {filename}: {e}")
@@ -465,8 +474,17 @@ def extract_image_description(
                 "customer names, financial figures, and operational facts. "
                 "Format cleanly in Markdown. Never hallucinate — transcribe strictly what is visible."
             )
-            resp = client.models.generate_content(model="gemini-2.5-flash", contents=[part, prompt])
-            if resp.text and len(resp.text.strip()) > 5:
+            gemini_model = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
+            resp = None
+            for target_m in [gemini_model, "gemini-2.5-flash"]:
+                try:
+                    resp = client.models.generate_content(model=target_m, contents=[part, prompt])
+                    if resp and resp.text:
+                        break
+                except Exception as m_err:
+                    logger.warning(f"Gemini vision with {target_m} failed: {m_err}")
+                    continue
+            if resp and resp.text and len(resp.text.strip()) > 5:
                 return f"**Visual Intelligence Extraction for {filename}:**\n\n{resp.text.strip()}", "gemini_vision"
         except Exception as e:
             logger.warning(f"Gemini vision failed for {filename}: {e}. Trying Groq...")

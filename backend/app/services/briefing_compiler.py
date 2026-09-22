@@ -29,8 +29,6 @@ CANDIDATE_MODELS = [
     os.environ.get("GROQ_MODEL"),
     "openai/gpt-oss-120b",
     "openai/gpt-oss-20b",
-    "groq/compound",
-    "groq/compound-mini",
     "qwen/qwen3.8-27b",
 ]
 PREFERRED_MODELS = [m for i, m in enumerate(CANDIDATE_MODELS) if m and m not in CANDIDATE_MODELS[:i]]
@@ -195,9 +193,46 @@ def compile_meeting_briefing(analysis: dict) -> dict:
                 if attempt == 1 and 'raw_text' in locals() and raw_text:
                     messages.append({"role": "assistant", "content": raw_text})
 
+    # Fallback to Gemini if Groq models failed
+    logger.warning(f"Groq API models failed for briefing compiler ({last_error}). Attempting Gemini fallback...")
+    gemini_briefing = _compile_with_gemini(analysis, system_prompt)
+    if gemini_briefing:
+        return gemini_briefing
+
     raise BriefingCompilerError(
-        f"Failed to compile meeting briefing after retry. Last error: {last_error}"
+        f"Failed to compile meeting briefing after retry on both Groq and Gemini. Last error: {last_error}"
     ) from last_error
+
+
+def _compile_with_gemini(analysis: dict, system_prompt: str) -> Optional[dict]:
+    """Fallback compiler using Google Gemini when Groq hits rate limits or capacity constraints."""
+    gemini_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    if not gemini_key:
+        return None
+    try:
+        from google import genai
+        client = genai.Client(api_key=gemini_key)
+        prompt = (
+            f"{system_prompt}\n\n"
+            f"BUSINESS ANALYSIS INPUT:\n{json.dumps(analysis, indent=2)}\n\n"
+            "Return valid JSON matching the schema with 'conversational_context' and 'custom_greeting'."
+        )
+        for m in [os.environ.get("GEMINI_MODEL", "gemini-3.8-flash"), "gemini-2.5-flash"]:
+            try:
+                logger.info(f"Compiling meeting briefing with Gemini ({m})...")
+                resp = client.models.generate_content(
+                    model=m,
+                    contents=prompt,
+                    config={"response_mime_type": "application/json"}
+                )
+                if resp and resp.text:
+                    return _parse_and_validate_briefing(resp.text)
+            except Exception as e:
+                logger.warning(f"Briefing compilation with Gemini {m} failed: {e}")
+                continue
+    except Exception as e:
+        logger.warning(f"Gemini briefing compilation failed: {e}")
+    return None
 
 
 if __name__ == "__main__":

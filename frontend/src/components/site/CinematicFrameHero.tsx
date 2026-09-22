@@ -62,14 +62,14 @@ export function CinematicFrameHero() {
       setProgress(100);
       const exitTimer = setTimeout(() => {
         setIsExiting(true);
-        const removeTimer = setTimeout(() => {
+        setTimeout(() => {
           setIsLoading(false);
         }, 750);
-        return () => clearTimeout(removeTimer);
       }, 500);
 
       return () => clearTimeout(exitTimer);
     }
+    return undefined;
   }, [videoReady, statusIndex]);
 
   // Frame-accurate hardware video synchronization
