@@ -106,8 +106,8 @@ async def create_event(
     Configures Google reminders (popup/email).
     """
     meet_url = payload.meet_url
-    if payload.meeting_type == "google_meet" and not meet_url:
-        meet_url = calendar_service.generate_google_meet_url()
+    if payload.meeting_type in ("live_video", "google_meet", "video") and not meet_url:
+        meet_url = calendar_service.generate_live_video_room(payload.company_name)
 
     event_data = {
         "customer_name": payload.customer_name,
@@ -278,3 +278,119 @@ async def send_whatsapp_for_event(event_id: str, phone: Optional[str] = Query(No
         "customer_phone": target_phone,
     })
     return {"success": True, "message": "WhatsApp confirmation dispatched successfully", "result": res}
+
+
+class ApproveBookingRequest(BaseModel):
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    meet_url: Optional[str] = None
+    phone: Optional[str] = None
+    notes: Optional[str] = None
+
+
+@router.get("/check-conflict")
+async def check_slot_conflict(
+    start: str = Query(..., description="ISO-8601 start timestamp"),
+    end: str = Query(..., description="ISO-8601 end timestamp"),
+    user_id: Optional[str] = Query(None),
+    exclude_id: Optional[str] = Query(None),
+):
+    """Check if candidate slot conflicts with any existing active calendar booking."""
+    return await calendar_service.check_calendar_conflict(
+        start_time_iso=start,
+        end_time_iso=end,
+        user_id=user_id,
+        exclude_event_id=exclude_id,
+    )
+
+
+@router.post("/events/{event_id}/approve-and-send")
+async def approve_and_send_whatsapp(
+    event_id: str,
+    payload: Optional[ApproveBookingRequest] = None,
+):
+    """
+    Sales Agent 'Tick to Approve' workflow:
+    1. Confirms the booking status from 'new_booking' to 'confirmed'.
+    2. Allows the sales agent to optionally adjust the slot time (e.g. if resolving a conflict).
+    3. Guarantees an active, live Jitsi Meet video room link.
+    4. Automatically dispatches the WhatsApp meeting invitation with live video room, time slot,
+       and full call transcript requirements recap directly to the customer.
+    """
+    event = await db.get_calendar_event(event_id)
+    if not event:
+        raise HTTPException(status_code=404, detail="Calendar event not found")
+
+    updates: dict = {
+        "status": "confirmed",
+        "has_conflict": False,
+        "approved_at": datetime.now(timezone.utc).isoformat(),
+        "approved_by": "sales_agent",
+    }
+
+    if payload:
+        if payload.start_time:
+            updates["start_time"] = payload.start_time
+        if payload.end_time:
+            updates["end_time"] = payload.end_time
+        if payload.meet_url:
+            updates["meet_url"] = payload.meet_url
+        if payload.notes:
+            updates["notes"] = payload.notes
+        if payload.phone:
+            updates["customer_phone"] = payload.phone
+
+    # Ensure working live video room link
+    meet_url = updates.get("meet_url") or event.get("meet_url")
+    if not meet_url or "meet.google.com" in meet_url:
+        meet_url = calendar_service.generate_live_video_room(
+            event.get("company_name"), event.get("id") or event_id
+        )
+        updates["meet_url"] = meet_url
+
+    # Check recipient phone number
+    target_phone = updates.get("customer_phone") or event.get("customer_phone")
+    if not target_phone:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot dispatch WhatsApp: No customer phone number associated with this booking."
+        )
+
+    # Format and send rich WhatsApp message
+    from app.services import whatsapp_service
+    start_time_to_send = updates.get("start_time") or event.get("start_time") or ""
+    agenda_to_send = event.get("agenda") or event.get("description") or ""
+    requirements_to_send = updates.get("notes") or event.get("notes") or ""
+
+    wa_res = await whatsapp_service.send_meeting_confirmation(
+        customer_name=event.get("customer_name") or "there",
+        customer_phone=target_phone,
+        business_name=event.get("company_name") or "Vyepari X",
+        start_time=start_time_to_send,
+        meet_url=meet_url,
+        agenda=agenda_to_send,
+        requirements=requirements_to_send,
+    )
+
+    if not wa_res.get("success"):
+        updates["whatsapp_status"] = "failed"
+        updates["whatsapp_error"] = wa_res.get("error")
+        await db.update_calendar_event(event_id, updates)
+        return {
+            "success": False,
+            "error": f"Booking confirmed, but WhatsApp failed to send: {wa_res.get('error')}",
+            "event_id": event_id,
+            "meet_url": meet_url,
+        }
+
+    updates["whatsapp_status"] = "sent"
+    updates["whatsapp_sent_at"] = datetime.now(timezone.utc).isoformat()
+    updated_event = await db.update_calendar_event(event_id, updates)
+
+    return {
+        "success": True,
+        "message": f"✓ Booking confirmed and WhatsApp dispatched to {target_phone} with Live Video link!",
+        "event": updated_event,
+        "whatsapp_result": wa_res,
+        "meet_url": meet_url,
+    }

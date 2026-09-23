@@ -39,11 +39,20 @@ export interface CalendarEventRecord {
   company_name?: string;
   title: string;
   description?: string;
+  agenda?: string;
+  notes?: string;
+  transcript?: any;
   start_time: string;
   end_time: string;
-  meeting_type: "google_meet" | "phone_call" | "in_person";
+  meeting_type: "live_video" | "google_meet" | "phone_call" | "in_person";
   meet_url?: string;
-  status: "scheduled" | "completed" | "cancelled";
+  status: "new_booking" | "scheduled" | "confirmed" | "completed" | "cancelled";
+  has_conflict?: boolean;
+  conflict_details?: any;
+  suggested_alternate_start?: string;
+  suggested_alternate_end?: string;
+  whatsapp_status?: string;
+  whatsapp_sent_at?: string;
   reminder_minutes: number;
   remind_via: string;
   google_event_id?: string;
@@ -127,6 +136,8 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
   // WhatsApp Dispatch Handler
   const [waSending, setWaSending] = useState(false);
   const [waResult, setWaResult] = useState<string | null>(null);
+  const [approvingId, setApprovingId] = useState<string | null>(null);
+  const [viewTranscriptEvent, setViewTranscriptEvent] = useState<CalendarEventRecord | null>(null);
 
   const handleSendWhatsApp = async (eventId: string, phone?: string) => {
     try {
@@ -146,6 +157,38 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
       setWaResult(e.message || "Error contacting server");
     } finally {
       setWaSending(false);
+    }
+  };
+
+  const handleApproveAndSendWhatsApp = async (
+    eventId: string,
+    customStartTime?: string,
+    customEndTime?: string
+  ) => {
+    try {
+      setApprovingId(eventId);
+      const res = await fetch(`${API_BASE}/api/calendar/events/${eventId}/approve-and-send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          start_time: customStartTime,
+          end_time: customEndTime,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        triggerSuccess(`✓ Meeting Confirmed & WhatsApp dispatched to ${data.event?.customer_phone || "customer"} with Live Video link!`);
+        await fetchEvents();
+        if (selectedEvent?.id === eventId) {
+          setSelectedEvent(data.event || null);
+        }
+      } else {
+        alert(`Approval notice: ${data.detail || data.error || "Failed to dispatch WhatsApp message. Ensure gateway is connected."}`);
+      }
+    } catch (e: any) {
+      alert(`Error approving booking: ${e.message}`);
+    } finally {
+      setApprovingId(null);
     }
   };
 
@@ -380,6 +423,11 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
            d.getFullYear() === today.getFullYear();
   };
 
+  // AI Call Bookings awaiting sales agent confirmation (Tick workflow)
+  const newBookings = useMemo(() => {
+    return events.filter((e) => e.status === "new_booking");
+  }, [events]);
+
   return (
     <div className="space-y-6">
       {/* Top Banner / Actions Notification */}
@@ -392,6 +440,118 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
           <button onClick={() => setActionSuccessMsg(null)} className="text-muted-foreground hover:text-ink">
             <X className="w-3.5 h-3.5" />
           </button>
+        </div>
+      )}
+
+      {/* ─────────────────── NEW BOOKINGS AWAITING CONFIRMATION QUEUE ─────────────────── */}
+      {newBookings.length > 0 && (
+        <div className="border-2 border-amber-500 bg-amber-500/5 dark:bg-amber-950/20 p-4 sm:p-5 transition-all">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3.5 pb-2.5 border-b border-amber-500/20">
+            <div className="flex items-center gap-2.5">
+              <span className="flex h-2.5 w-2.5 rounded-full bg-amber-500 animate-pulse" />
+              <h3 className="font-display text-sm font-black uppercase tracking-wider text-amber-900 dark:text-amber-300 flex items-center gap-2">
+                ⚡ New Bookings Awaiting Agent Confirmation ({newBookings.length})
+              </h3>
+            </div>
+            <span className="text-[11px] font-mono text-muted-foreground">
+              Review slot availability & transcript, then tick to confirm and send live video link via WhatsApp.
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+            {newBookings.map((ev) => (
+              <div
+                key={ev.id}
+                className="border border-ink/30 bg-card p-4 flex flex-col justify-between gap-3 shadow-sm hover:border-ink transition-all"
+              >
+                <div className="space-y-2.5">
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="font-display text-xs font-bold uppercase text-ink line-clamp-1">
+                      {ev.title}
+                    </span>
+                    {ev.has_conflict ? (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-mono font-bold bg-destructive/15 text-destructive border border-destructive/30 shrink-0">
+                        <AlertCircle className="w-3 h-3" /> Conflict Detected
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-mono font-bold bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 shrink-0">
+                        <Check className="w-3 h-3" /> Slot Available
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="text-xs font-mono text-muted-foreground space-y-1">
+                    <div className="flex items-center gap-1.5 text-ink font-semibold">
+                      <User className="w-3.5 h-3.5 text-muted-foreground" />
+                      <span>{ev.customer_name}</span>
+                      {ev.customer_phone && <span className="text-muted-foreground font-normal">({ev.customer_phone})</span>}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <Clock className="w-3.5 h-3.5 text-muted-foreground" />
+                      <span>
+                        {new Date(ev.start_time).toLocaleDateString([], { month: "short", day: "numeric" })} • {formatTimeRange(ev.start_time, ev.end_time)}
+                      </span>
+                    </div>
+                    {ev.has_conflict && ev.suggested_alternate_start && (
+                      <div className="text-[11px] text-amber-700 dark:text-amber-400 bg-amber-500/10 p-2 border border-amber-500/20 font-mono space-y-1">
+                        <div>⚠️ Overlaps with prior booking.</div>
+                        <div className="flex items-center justify-between gap-1">
+                          <span>Next free: {new Date(ev.suggested_alternate_start).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleApproveAndSendWhatsApp(ev.id, ev.suggested_alternate_start, ev.suggested_alternate_end)}
+                            className="underline font-bold hover:text-ink"
+                          >
+                            Use Slot
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {ev.meet_url && (
+                    <div className="pt-1">
+                      <a
+                        href={ev.meet_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 text-[11px] font-mono text-violet hover:underline truncate max-w-full"
+                      >
+                        <Video className="w-3.5 h-3.5 shrink-0" />
+                        <span className="truncate">Live Video Room: {ev.meet_url.split("/").pop()}</span>
+                        <ExternalLink className="w-2.5 h-2.5 shrink-0" />
+                      </a>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2 pt-2 border-t border-ink/10">
+                  <button
+                    type="button"
+                    onClick={() => setViewTranscriptEvent(ev)}
+                    className="flex-1 py-1.5 px-2 text-[11px] font-mono font-bold border border-ink/30 hover:bg-secondary text-ink flex items-center justify-center gap-1"
+                    title="View Call Transcript & Notes"
+                  >
+                    <MessageSquare className="w-3 h-3" /> Notes
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleApproveAndSendWhatsApp(ev.id)}
+                    disabled={approvingId === ev.id}
+                    className="flex-1 py-1.5 px-2 text-[11px] font-mono font-bold bg-emerald-600 hover:bg-emerald-700 text-white flex items-center justify-center gap-1.5 shadow-sm transition-all"
+                    title="Confirm meeting and dispatch WhatsApp invite"
+                  >
+                    {approvingId === ev.id ? (
+                      <RefreshCw className="w-3 h-3 animate-spin" />
+                    ) : (
+                      <Check className="w-3.5 h-3.5" />
+                    )}
+                    <span>Confirm & Send</span>
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -1023,7 +1183,9 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
             {selectedEvent.meet_url && (
               <div className="border border-violet/40 bg-violet/10 p-3 flex items-center justify-between">
                 <div className="truncate pr-2">
-                  <span className="label-mono text-[9px] text-violet block uppercase">Google Meet Room</span>
+                  <span className="label-mono text-[9px] text-violet block uppercase font-bold">
+                    {selectedEvent.meet_url.includes("jit.si") ? "🎥 Live Video Room (Jitsi Meet)" : "Video Meeting Room"}
+                  </span>
                   <span className="font-mono text-xs text-ink truncate block font-bold">
                     {selectedEvent.meet_url}
                   </span>
@@ -1035,14 +1197,36 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
                   className="flex items-center gap-1 bg-violet text-white px-3 py-1.5 label-mono text-xs font-bold hover:bg-violet/90 shrink-0"
                 >
                   <ExternalLink className="w-3 h-3" />
-                  <span>Join</span>
+                  <span>Join Room</span>
                 </a>
+              </div>
+            )}
+
+            {/* Conversation Transcript (if available from voice call) */}
+            {selectedEvent.transcript && (
+              <div className="space-y-1">
+                <span className="label-mono text-muted-foreground text-[10px] uppercase font-bold">AI Call Transcript</span>
+                <div className="max-h-40 overflow-y-auto font-mono text-[11px] bg-paper border border-ink/20 p-3 text-ink space-y-1.5">
+                  {typeof selectedEvent.transcript === "string" ? (
+                    <pre className="whitespace-pre-wrap font-mono text-[11px]">{selectedEvent.transcript}</pre>
+                  ) : Array.isArray(selectedEvent.transcript) ? (
+                    selectedEvent.transcript.map((t: any, idx: number) => (
+                      <div key={idx} className="flex gap-2">
+                        <span className="text-violet font-bold shrink-0">{t.speaker || "User"}:</span>
+                        <span className="text-ink">{t.message || t.text}</span>
+                      </div>
+                    ))
+                  ) : (
+                    <pre className="whitespace-pre-wrap font-mono text-[11px]">{JSON.stringify(selectedEvent.transcript, null, 2)}</pre>
+                  )}
+                </div>
               </div>
             )}
 
             {/* Bottom Modal Actions */}
             <div className="flex items-center justify-between pt-2 border-t border-ink/20">
               <button
+                type="button"
                 onClick={() => handleDeleteEvent(selectedEvent.id)}
                 className="flex items-center gap-1 text-xs font-mono text-red-500 hover:text-red-700"
               >
@@ -1051,18 +1235,35 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
               </button>
 
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleSendWhatsApp(selectedEvent.id, selectedEvent.customer_phone)}
-                  disabled={waSending}
-                  className="flex items-center gap-1.5 px-3 py-2 label-mono text-xs font-bold border border-lime/50 bg-lime/10 text-lime-800 dark:text-lime hover:bg-lime/20 transition-all"
-                  title="Dispatch WhatsApp meeting invite with Google Meet link"
-                >
-                  <MessageSquare className="w-3.5 h-3.5 text-lime-600 dark:text-lime" />
-                  <span>{waSending ? "Sending..." : "Send WhatsApp"}</span>
-                </button>
+                {selectedEvent.status === "new_booking" ? (
+                  <button
+                    type="button"
+                    onClick={() => handleApproveAndSendWhatsApp(selectedEvent.id)}
+                    disabled={approvingId === selectedEvent.id}
+                    className="flex items-center gap-1.5 px-4 py-2 label-mono text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition-all"
+                  >
+                    {approvingId === selectedEvent.id ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Check className="w-3.5 h-3.5" />
+                    )}
+                    <span>✓ Confirm & Send WhatsApp</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => handleSendWhatsApp(selectedEvent.id, selectedEvent.customer_phone)}
+                    disabled={waSending}
+                    className="flex items-center gap-1.5 px-3 py-2 label-mono text-xs font-bold border border-lime/50 bg-lime/10 text-lime-800 dark:text-lime hover:bg-lime/20 transition-all"
+                    title="Dispatch WhatsApp meeting invite with live video link"
+                  >
+                    <MessageSquare className="w-3.5 h-3.5 text-lime-600 dark:text-lime" />
+                    <span>{waSending ? "Sending..." : "Send WhatsApp"}</span>
+                  </button>
+                )}
 
                 <button
+                  type="button"
                   onClick={(e) => handleMarkDone(e, selectedEvent.id, selectedEvent.status)}
                   className={`flex items-center gap-1.5 px-4 py-2 label-mono text-xs font-bold border transition-all ${
                     selectedEvent.status === "completed"
@@ -1071,7 +1272,7 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
                   }`}
                 >
                   <Check className={`w-3.5 h-3.5 ${selectedEvent.status === "completed" ? "text-lime-foreground" : "text-paper"}`} />
-                  <span>{selectedEvent.status === "completed" ? "Done (Completed)" : "Mark Done"}</span>
+                  <span>{selectedEvent.status === "completed" ? "Done" : "Mark Done"}</span>
                 </button>
               </div>
             </div>
@@ -1237,6 +1438,107 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ─────────────────── CALL TRANSCRIPT & REQUIREMENTS MODAL ─────────────────── */}
+      {viewTranscriptEvent && (
+        <div className="fixed inset-0 z-50 bg-ink/70 flex items-center justify-center p-4 backdrop-blur-xs">
+          <div className="border border-ink bg-card max-w-xl w-full p-6 space-y-4 shadow-2xl relative">
+            <button
+              type="button"
+              onClick={() => setViewTranscriptEvent(null)}
+              className="absolute right-4 top-4 p-1 text-muted-foreground hover:text-ink hover:bg-secondary"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <div>
+              <span className="label-mono text-violet text-[10px] uppercase font-bold tracking-wider">
+                AI Voice Agent Conversation Record
+              </span>
+              <h3 className="font-display text-lg font-extrabold uppercase tracking-tight text-ink mt-0.5">
+                {viewTranscriptEvent.title}
+              </h3>
+              <p className="text-xs font-mono text-muted-foreground mt-0.5">
+                Customer: <strong className="text-ink">{viewTranscriptEvent.customer_name}</strong> {viewTranscriptEvent.customer_phone ? `(${viewTranscriptEvent.customer_phone})` : ""}
+              </p>
+            </div>
+
+            {/* Topics & Agenda */}
+            {(viewTranscriptEvent.agenda || viewTranscriptEvent.description) && (
+              <div className="border border-ink/20 bg-paper p-3 text-xs font-mono">
+                <span className="label-mono text-muted-foreground text-[10px] uppercase font-bold block mb-1">
+                  Extracted Requirements & Agenda
+                </span>
+                <p className="text-ink leading-relaxed">
+                  {viewTranscriptEvent.agenda || viewTranscriptEvent.description}
+                </p>
+              </div>
+            )}
+
+            {/* Verbatim Transcript */}
+            <div className="space-y-1">
+              <span className="label-mono text-muted-foreground text-[10px] uppercase font-bold block">
+                Verbatim Call Transcript
+              </span>
+              <div className="max-h-64 overflow-y-auto border border-ink/20 bg-paper p-3 font-mono text-xs text-ink space-y-2">
+                {typeof viewTranscriptEvent.transcript === "string" ? (
+                  <pre className="whitespace-pre-wrap font-mono text-xs">{viewTranscriptEvent.transcript}</pre>
+                ) : Array.isArray(viewTranscriptEvent.transcript) ? (
+                  viewTranscriptEvent.transcript.map((t: any, idx: number) => (
+                    <div key={idx} className="flex gap-2 leading-relaxed">
+                      <span className="text-violet font-bold shrink-0">{t.speaker || "User"}:</span>
+                      <span className="text-ink">{t.message || t.text}</span>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-muted-foreground italic">No verbatim transcript captured for this call.</p>
+                )}
+              </div>
+            </div>
+
+            {/* Bottom Actions */}
+            <div className="flex items-center justify-between pt-3 border-t border-ink/20">
+              {viewTranscriptEvent.meet_url && (
+                <a
+                  href={viewTranscriptEvent.meet_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 text-xs font-mono text-violet hover:underline"
+                >
+                  <Video className="w-3.5 h-3.5" />
+                  <span>Test Video Room</span>
+                  <ExternalLink className="w-2.5 h-2.5" />
+                </a>
+              )}
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setViewTranscriptEvent(null)}
+                  className="px-3.5 py-1.5 border border-ink/20 bg-paper text-ink label-mono text-xs hover:bg-secondary"
+                >
+                  Close
+                </button>
+                {viewTranscriptEvent.status === "new_booking" && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const id = viewTranscriptEvent.id;
+                      setViewTranscriptEvent(null);
+                      handleApproveAndSendWhatsApp(id);
+                    }}
+                    disabled={approvingId === viewTranscriptEvent.id}
+                    className="px-4 py-1.5 border border-ink bg-emerald-600 hover:bg-emerald-700 text-white label-mono text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>Confirm & Send WhatsApp</span>
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       )}

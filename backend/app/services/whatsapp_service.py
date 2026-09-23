@@ -161,7 +161,7 @@ async def send_meeting_confirmation(
     requirements: Optional[str] = None,
 ) -> dict:
     """
-    Builds and sends a meeting confirmation message with Google Meet link.
+    Builds and sends a meeting confirmation message with live video room link & call requirements.
     """
     c_name = (customer_name or "there").strip()
     b_name = (business_name or "our team").strip()
@@ -170,23 +170,27 @@ async def send_meeting_confirmation(
     lines = [
         f"नमस्ते / Hello {c_name}! 🎉",
         "",
-        f"Thank you for speaking with us today! As agreed on our call, your product demo & discovery session with *{b_name}* is confirmed.",
+        f"Thank you for speaking with our team today! As discussed, your product demonstration & briefing session with *{b_name}* is officially confirmed.",
         "",
         f"📅 *Date & Time:* {formatted_time}",
-        f"🔗 *Google Meet Link:* {meet_url}",
+        f"🎥 *Live Video Meeting Room:*",
+        f"{meet_url}",
+        "_(Click link above to join from your mobile phone or PC. No app download or account required!)_",
     ]
 
     if agenda:
         clean_agenda = agenda.strip()
-        lines.append(f"📋 *Discussion Agenda:*\n{clean_agenda}")
+        lines.extend(["", f"📋 *Discussion Agenda & Topics:*\n{clean_agenda}"])
 
     if requirements:
         clean_req = requirements.strip()
-        lines.append(f"\n📌 *Your Requirements Noted:*\n_{clean_req}_")
+        lines.extend(["", f"📌 *Key Requirements Noted from Call:*\n_{clean_req}_"])
 
     lines.extend([
         "",
-        "Looking forward to connecting! If you need to reschedule or have questions before the meeting, simply reply to this message anytime.",
+        "💡 *Session Tips:* Please join 2 minutes early with your camera and microphone enabled for the live walkthrough.",
+        "",
+        "Looking forward to connecting! If you need to reschedule or have questions before the session, simply reply to this WhatsApp message.",
         f"— Team *{b_name}*",
     ])
 
