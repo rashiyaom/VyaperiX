@@ -42,6 +42,7 @@ from app.routers import video_router
 from app.routers import calendar_router
 from app.routers import profile_router
 from app.routers import whatsapp_router
+from app.routers import prospecting_router
 from app.services.search.router import get_search_router
 from config.domain_trust import classify_and_filter
 
@@ -90,6 +91,9 @@ app.include_router(whatsapp_router.router, prefix="/api/whatsapp", tags=["WhatsA
 
 # Mount User Profile Router (backed by MongoDB)
 app.include_router(profile_router.router, prefix="/api/profile", tags=["User Profile"])
+
+# Mount Autonomous Prospecting & Market Radar Router (Apollo + DuckDuckGo + Groq)
+app.include_router(prospecting_router.router, prefix="/api/prospecting", tags=["Autonomous Prospecting & Radar"])
 
 # Also expose Vapi, Sarvam & Tavus Webhooks and Outbound at root path level for compatibility
 app.add_api_route("/webhook/vapi/custom-voice", voice_router.vapi_custom_voice_webhook, methods=["GET", "POST", "HEAD"], tags=["Voice Fleet Webhook"])

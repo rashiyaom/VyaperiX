@@ -123,6 +123,7 @@ _in_memory_calls: Dict[str, dict] = {}
 _in_memory_voice_campaigns: Dict[str, dict] = {}
 _in_memory_video_calls: Dict[str, dict] = {}
 _in_memory_calendar_events: Dict[str, dict] = {}
+_in_memory_prospect_leads: Dict[str, dict] = {}
 _in_memory_profiles: Dict[str, dict] = {}
 _in_memory_voice_settings: Dict[str, str] = {}
 
@@ -909,3 +910,97 @@ async def delete_calendar_event(event_id: str) -> bool:
     except Exception as e:
         logger.warning(f"MongoDB delete_calendar_event error for {event_id}: {e}")
         return True
+
+
+# ─────────────────────────── Prospect Leads (Apollo + DDG) ───────────────
+
+async def save_prospect_lead(lead_data: dict, user_id: Optional[str] = None) -> str:
+    """Save or update an enriched prospect lead in MongoDB and cache."""
+    lead_id = lead_data.get("id") or str(uuid.uuid4())
+    clean_uid = _clean_user_id(user_id or lead_data.get("user_id"))
+    now = _now_iso()
+
+    row = dict(lead_data)
+    row["id"] = lead_id
+    row["user_id"] = clean_uid
+    row["created_at"] = row.get("created_at") or now
+    row["updated_at"] = now
+
+    _in_memory_prospect_leads[lead_id] = dict(row)
+
+    if _mongo_connected:
+        try:
+            db = get_mongo_db()
+            await db["prospect_leads"].update_one({"id": lead_id}, {"$set": dict(row)}, upsert=True)
+        except Exception as e:
+            logger.warning(f"MongoDB save_prospect_lead error for {lead_id}: {e}")
+
+    return lead_id
+
+
+async def save_prospect_leads_batch(leads: List[dict], user_id: Optional[str] = None) -> List[dict]:
+    """Save a list of prospect leads."""
+    saved = []
+    for l in leads:
+        lid = await save_prospect_lead(l, user_id=user_id)
+        saved.append(_in_memory_prospect_leads.get(lid, l))
+    return saved
+
+
+async def get_prospect_lead(lead_id: str) -> Optional[dict]:
+    """Fetch single prospect lead by ID."""
+    if _mongo_connected:
+        try:
+            db = get_mongo_db()
+            doc = await db["prospect_leads"].find_one({"id": lead_id})
+            if doc:
+                cleaned = _clean_doc(doc)
+                _in_memory_prospect_leads[lead_id] = cleaned
+                return cleaned
+        except Exception as e:
+            logger.warning(f"MongoDB get_prospect_lead error for {lead_id}: {e}")
+
+    return _in_memory_prospect_leads.get(lead_id)
+
+
+async def list_prospect_leads(user_id: Optional[str] = None, limit: int = 50) -> List[dict]:
+    """List prospect leads ordered by updated_at descending."""
+    clean_uid = _clean_user_id(user_id)
+    if _mongo_connected:
+        query: Dict[str, Any] = {}
+        if clean_uid:
+            query["$or"] = [{"user_id": clean_uid}, {"user_id": None}]
+        try:
+            db = get_mongo_db()
+            cursor = db["prospect_leads"].find(query).sort("updated_at", -1).limit(limit)
+            docs = await cursor.to_list(length=limit)
+            return [_clean_doc(d) for d in docs]
+        except Exception as e:
+            logger.warning(f"MongoDB list_prospect_leads error: {e}")
+
+    leads = list(_in_memory_prospect_leads.values())
+    if clean_uid:
+        leads = [l for l in leads if l.get("user_id") in (clean_uid, None)]
+    leads.sort(key=lambda x: x.get("updated_at", ""), reverse=True)
+    return leads[:limit]
+
+
+async def update_prospect_lead(lead_id: str, updates: dict) -> Optional[dict]:
+    """Update fields on a prospect lead."""
+    clean_updates = dict(updates)
+    clean_updates["updated_at"] = _now_iso()
+
+    if lead_id in _in_memory_prospect_leads:
+        _in_memory_prospect_leads[lead_id].update(clean_updates)
+
+    if _mongo_connected:
+        try:
+            db = get_mongo_db()
+            await db["prospect_leads"].update_one({"id": lead_id}, {"$set": clean_updates})
+            doc = await db["prospect_leads"].find_one({"id": lead_id})
+            if doc:
+                return _clean_doc(doc)
+        except Exception as e:
+            logger.warning(f"MongoDB update_prospect_lead error for {lead_id}: {e}")
+
+    return _in_memory_prospect_leads.get(lead_id)
