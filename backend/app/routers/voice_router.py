@@ -488,59 +488,101 @@ async def test_sarvam_service(speaker: Optional[str] = "priya", language: Option
 
 
 
-@router.post("/webhook/vapi/custom-voice")
+@router.api_route("/webhook/vapi/custom-voice", methods=["GET", "POST", "HEAD"])
 async def vapi_custom_voice_webhook(request: Request):
     """
-    Vapi custom-voice webhook endpoint.
-    Receives voice-request from Vapi with text to synthesize,
-    synthesizes speech using Sarvam Bulbul v3, and streams raw 16-bit PCM bytes back.
+    Vapi Custom Voice Webhook Endpoint for Sarvam AI Bulbul v3.
+    - GET / HEAD: Returns operational status and supported Indic language metadata.
+    - POST: Receives 'voice-request' from Vapi, synthesizes Indic speech using Sarvam Bulbul:v3,
+      and streams raw 16-bit linear PCM audio bytes (at requested sample rate, e.g. 24000 Hz) directly to Vapi.
     """
+    if request.method in ("GET", "HEAD"):
+        return {
+            "status": "active",
+            "service": "VyaperiX Sarvam Bulbul v3 Custom Voice Bridge for Vapi",
+            "model": "bulbul:v3",
+            "default_speaker": "priya",
+            "supported_languages": [
+                "hi-IN", "gu-IN", "mr-IN", "ta-IN", "te-IN",
+                "bn-IN", "kn-IN", "ml-IN", "pa-IN", "or-IN", "en-IN",
+            ],
+            "sample_rate_default": 24000,
+            "vapi_compatible": True,
+        }
+
     try:
-        body = await request.json()
-        msg = body.get("message", {})
-        msg_type = msg.get("type")
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
 
-        # If it's a voice synthesis request
-        if msg_type == "voice-request":
-            text = msg.get("text", "")
-            target_sr = msg.get("sampleRate") or 24000
-            call_obj = msg.get("call", {})
-            # Determine language if specified in call assistant or default based on script
-            language = "en-IN"
+        msg = body.get("message") if isinstance(body.get("message"), dict) else {}
+        msg_type = msg.get("type") or body.get("type") or "voice-request"
+
+        # Handle health check or status pings from Vapi
+        if msg_type in ("ping", "health", "status-update"):
+            return {"status": "ok"}
+
+        # Extract text to synthesize
+        text = (msg.get("text") or body.get("text") or "").strip()
+        target_sr = int(msg.get("sampleRate") or body.get("sampleRate") or 24000)
+        call_obj = msg.get("call") or body.get("call") or {}
+
+        if not text:
+            # Return empty PCM bytes cleanly
+            return Response(content=b"", media_type="audio/pcm")
+
+        # Determine language (explicit or auto-detected from script)
+        explicit_lang = msg.get("language") or body.get("language")
+        if explicit_lang:
+            language = sarvam_service.resolve_language_code(explicit_lang)
+        else:
             combined_text = text
-            if call_obj:
-                assistant = call_obj.get("assistant", {})
+            if call_obj and isinstance(call_obj, dict):
+                assistant = call_obj.get("assistant") or {}
                 first_msg = assistant.get("firstMessage", "")
-                combined_text = f"{first_msg} {text}"
+                if first_msg:
+                    combined_text = f"{first_msg} {text}"
+            language = sarvam_service.detect_indic_language(combined_text)
 
-            if any(ord(c) >= 0x0A80 and ord(c) <= 0x0AFF for c in combined_text):
-                language = "gu-IN"
-            elif any(ord(c) >= 0x0900 and ord(c) <= 0x097F for c in combined_text):
-                language = "hi-IN"
-            else:
-                language = "en-IN"
+        api_key = os.getenv("SARVAM_API_KEY", "").strip()
+        speaker = msg.get("speaker") or body.get("speaker") or os.getenv("SARVAM_SPEAKER", "priya")
 
+        if not api_key:
             creds = await voice_engine.get_credentials()
-            speaker = creds.get("sarvam_speaker", "priya")
-            api_key = creds.get("sarvam_api_key")
+            api_key = creds.get("sarvam_api_key") or ""
+            if not speaker:
+                speaker = creds.get("sarvam_speaker", "priya")
 
-            pcm_bytes, out_sr = await sarvam_service.synthesize_raw_pcm(
-                text=text,
-                language=language,
-                speaker=speaker,
-                target_sample_rate=target_sr,
-                api_key=api_key,
+        pcm_bytes, out_sr = await sarvam_service.synthesize_raw_pcm(
+            text=text,
+            language=language,
+            speaker=speaker,
+            target_sample_rate=target_sr,
+            api_key=api_key,
+        )
+
+        if pcm_bytes:
+            return Response(
+                content=pcm_bytes,
+                media_type="audio/pcm",
+                headers={
+                    "Content-Type": "audio/pcm",
+                    "X-Voice-Provider": "Sarvam-Bulbul-v3",
+                    "X-Language": language,
+                    "X-Sample-Rate": str(out_sr),
+                },
             )
-            if pcm_bytes:
-                return Response(content=pcm_bytes, media_type="audio/pcm")
-            else:
-                logger.error("Failed to generate PCM audio from Sarvam.")
-                return Response(status_code=500, content=b"")
+        else:
+            logger.warning(f"Sarvam synthesis returned empty for text: '{text[:40]}...'. Returning brief silence.")
+            # Return 0.2s of 16-bit silence so Vapi doesn't drop the call
+            silence_bytes = b"\x00" * int(target_sr * 2 * 0.2)
+            return Response(content=silence_bytes, media_type="audio/pcm")
 
-        return {"status": "ok"}
     except Exception as e:
         logger.exception(f"Error handling Vapi custom-voice request: {e}")
-        return Response(status_code=500, content=b"")
+        silence_bytes = b"\x00" * int(24000 * 2 * 0.2)
+        return Response(content=silence_bytes, media_type="audio/pcm")
 
 
 @router.post("/webhook/vapi")

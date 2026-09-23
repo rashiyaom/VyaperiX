@@ -88,7 +88,7 @@ app.include_router(calendar_router.router, prefix="/api/calendar", tags=["Calend
 app.include_router(profile_router.router, prefix="/api/profile", tags=["User Profile"])
 
 # Also expose Vapi, Sarvam & Tavus Webhooks and Outbound at root path level for compatibility
-app.add_api_route("/webhook/vapi/custom-voice", voice_router.vapi_custom_voice_webhook, methods=["POST"], tags=["Voice Fleet Webhook"])
+app.add_api_route("/webhook/vapi/custom-voice", voice_router.vapi_custom_voice_webhook, methods=["GET", "POST", "HEAD"], tags=["Voice Fleet Webhook"])
 app.add_api_route("/webhook/vapi", voice_router.vapi_webhook, methods=["POST"], tags=["Voice Fleet Webhook"])
 app.add_api_route("/webhook/tavus", video_router.tavus_webhook, methods=["POST"], tags=["Video Sales Agent Webhook"])
 app.add_api_route("/sarvam/webhook", voice_router.sarvam_webhook, methods=["POST"], tags=["Sarvam Webhook"])
