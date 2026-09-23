@@ -124,6 +124,8 @@ _in_memory_voice_campaigns: Dict[str, dict] = {}
 _in_memory_video_calls: Dict[str, dict] = {}
 _in_memory_calendar_events: Dict[str, dict] = {}
 _in_memory_prospect_leads: Dict[str, dict] = {}
+_in_memory_crm_settings: Dict[str, dict] = {}
+_in_memory_crm_records: Dict[str, dict] = {}
 _in_memory_profiles: Dict[str, dict] = {}
 _in_memory_voice_settings: Dict[str, str] = {}
 
@@ -1023,3 +1025,125 @@ async def update_prospect_lead(lead_id: str, updates: dict) -> Optional[dict]:
             logger.warning(f"MongoDB update_prospect_lead error for {lead_id}: {e}")
 
     return _in_memory_prospect_leads.get(lead_id)
+
+
+# ─────────────────────────── CRM & Pipeline (HubSpot + Webhook) ─────────
+
+async def save_crm_settings(settings: dict, user_id: Optional[str] = None) -> dict:
+    """Save user CRM credentials and auto-sync toggles in MongoDB and cache."""
+    clean_uid = _clean_user_id(user_id) or "default_user"
+    now = _now_iso()
+
+    row = dict(settings)
+    row["user_id"] = clean_uid
+    row["updated_at"] = now
+
+    _in_memory_crm_settings[clean_uid] = dict(row)
+
+    if _mongo_connected:
+        try:
+            db = get_mongo_db()
+            await db["crm_settings"].update_one(
+                {"user_id": clean_uid},
+                {"$set": dict(row)},
+                upsert=True,
+            )
+        except Exception as e:
+            logger.warning(f"MongoDB save_crm_settings error: {e}")
+
+    return row
+
+
+async def get_crm_settings(user_id: Optional[str] = None) -> dict:
+    """Fetch user CRM settings from MongoDB with defaults."""
+    clean_uid = _clean_user_id(user_id) or "default_user"
+
+    if _mongo_connected:
+        try:
+            db = get_mongo_db()
+            doc = await db["crm_settings"].find_one({"user_id": clean_uid})
+            if doc:
+                cleaned = _clean_doc(doc)
+                _in_memory_crm_settings[clean_uid] = cleaned
+                return cleaned
+        except Exception as e:
+            logger.warning(f"MongoDB get_crm_settings error: {e}")
+
+    cached = _in_memory_crm_settings.get(clean_uid)
+    if cached:
+        return cached
+
+    # Return clean defaults from environment
+    return {
+        "user_id": clean_uid,
+        "provider": "hubspot",
+        "access_token": os.getenv("HUBSPOT_ACCESS_TOKEN", ""),
+        "webhook_url": os.getenv("CRM_WEBHOOK_URL", ""),
+        "auto_sync_radar": True,
+        "auto_sync_meetings": True,
+        "auto_sync_calls": True,
+        "updated_at": _now_iso(),
+    }
+
+
+async def save_crm_record(record: dict, user_id: Optional[str] = None) -> str:
+    """Save or update a synced CRM record (contact / deal / meeting) in MongoDB."""
+    rec_id = record.get("id") or str(uuid.uuid4())
+    clean_uid = _clean_user_id(user_id or record.get("user_id"))
+    now = _now_iso()
+
+    row = dict(record)
+    row["id"] = rec_id
+    row["user_id"] = clean_uid
+    row["synced_at"] = row.get("synced_at") or now
+    row["updated_at"] = now
+
+    _in_memory_crm_records[rec_id] = dict(row)
+
+    if _mongo_connected:
+        try:
+            db = get_mongo_db()
+            await db["crm_records"].update_one({"id": rec_id}, {"$set": dict(row)}, upsert=True)
+        except Exception as e:
+            logger.warning(f"MongoDB save_crm_record error: {e}")
+
+    return rec_id
+
+
+async def list_crm_records(user_id: Optional[str] = None, limit: int = 100) -> List[dict]:
+    """List synced CRM records ordered by synced_at descending."""
+    clean_uid = _clean_user_id(user_id)
+    if _mongo_connected:
+        query: Dict[str, Any] = {}
+        if clean_uid:
+            query["$or"] = [{"user_id": clean_uid}, {"user_id": None}]
+        try:
+            db = get_mongo_db()
+            cursor = db["crm_records"].find(query).sort("synced_at", -1).limit(limit)
+            docs = await cursor.to_list(length=limit)
+            return [_clean_doc(d) for d in docs]
+        except Exception as e:
+            logger.warning(f"MongoDB list_crm_records error: {e}")
+
+    records = list(_in_memory_crm_records.values())
+    if clean_uid:
+        records = [r for r in records if r.get("user_id") in (clean_uid, None)]
+    records.sort(key=lambda x: x.get("synced_at", ""), reverse=True)
+    return records[:limit]
+
+
+async def get_crm_record_by_lead_id(lead_id: str) -> Optional[dict]:
+    """Retrieve CRM sync record by associated prospect lead ID."""
+    if _mongo_connected:
+        try:
+            db = get_mongo_db()
+            doc = await db["crm_records"].find_one({"lead_id": lead_id})
+            if doc:
+                return _clean_doc(doc)
+        except Exception as e:
+            logger.warning(f"MongoDB get_crm_record_by_lead_id error: {e}")
+
+    for r in _in_memory_crm_records.values():
+        if r.get("lead_id") == lead_id:
+            return r
+    return None

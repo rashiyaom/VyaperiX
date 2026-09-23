@@ -28,6 +28,7 @@ import {
   Layers,
   Compass,
   Video,
+  Share2,
 } from "lucide-react";
 
 export interface Lead {
@@ -91,6 +92,8 @@ export function LeadRadarModule({
   // Action States
   const [callingLeadId, setCallingLeadId] = useState<string | null>(null);
   const [whatsAppingLeadId, setWhatsAppingLeadId] = useState<string | null>(null);
+  const [syncingCrmLeadId, setSyncingCrmLeadId] = useState<string | null>(null);
+  const [syncedCrmLeadIds, setSyncedCrmLeadIds] = useState<Record<string, { deal_id?: string; contact_id?: string }>>({});
   const [actionSuccessMsg, setActionSuccessMsg] = useState<{ leadId: string; text: string; type: "call" | "whatsapp" } | null>(null);
   const [actionErrorMsg, setActionErrorMsg] = useState<{ leadId: string; text: string } | null>(null);
 
@@ -166,8 +169,28 @@ export function LeadRadarModule({
     setIsLoadingExisting(false);
   };
 
+  // Fetch synced CRM records from backend
+  const fetchSyncedCrmRecords = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/crm/records?limit=100`);
+      if (res.ok) {
+        const data = await res.json();
+        const map: Record<string, { deal_id?: string; contact_id?: string }> = {};
+        (data.records || []).forEach((r: any) => {
+          if (r.lead_id) {
+            map[r.lead_id] = { deal_id: r.hubspot_deal_id, contact_id: r.hubspot_contact_id };
+          }
+        });
+        setSyncedCrmLeadIds(map);
+      }
+    } catch (e) {
+      // non-blocking
+    }
+  };
+
   useEffect(() => {
     fetchPersistedLeads();
+    fetchSyncedCrmRecords();
   }, [analysis]);
 
   // Execute Autonomous Discovery Pipeline
@@ -315,6 +338,40 @@ export function LeadRadarModule({
     }
     setEditingPhoneLeadId(null);
     setCustomPhoneInput("");
+  };
+
+  // 1-Click Sync to HubSpot CRM
+  const handleSyncToCRM = async (lead: Lead) => {
+    setSyncingCrmLeadId(lead.id);
+    setActionSuccessMsg(null);
+    setActionErrorMsg(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/crm/sync-lead`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lead_id: lead.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || "CRM Sync failed");
+      }
+      setSyncedCrmLeadIds((prev) => ({
+        ...prev,
+        [lead.id]: {
+          contact_id: data.contact?.id,
+          deal_id: data.deal?.id,
+        },
+      }));
+      setActionSuccessMsg({
+        leadId: lead.id,
+        text: `Lead synced to HubSpot CRM! Contact ID: ${data.contact?.id || "synced"}, Deal ID: ${data.deal?.id || "synced"}`,
+        type: "whatsapp",
+      });
+    } catch (err: any) {
+      setActionErrorMsg({ leadId: lead.id, text: `CRM Sync failed: ${err.message}` });
+    } finally {
+      setSyncingCrmLeadId(null);
+    }
   };
 
   // Quick Apollo Domain Lookup Test
@@ -851,6 +908,25 @@ export function LeadRadarModule({
                       {isWhatsApping ? "Sending..." : "Send WhatsApp Pitch"}
                     </button>
 
+                    {/* HubSpot CRM Sync Button */}
+                    <button
+                      onClick={() => handleSyncToCRM(lead)}
+                      disabled={syncingCrmLeadId === lead.id}
+                      className={`border px-3 py-2 label-mono text-xs font-bold transition-all flex items-center gap-1.5 ${
+                        syncedCrmLeadIds[lead.id]
+                          ? "border-violet/40 bg-violet/10 text-violet"
+                          : "border-ink/30 bg-paper text-ink hover:border-violet hover:bg-violet/5"
+                      }`}
+                      title="Sync prospect and commercial deal to HubSpot CRM"
+                    >
+                      <Share2 className={`w-3.5 h-3.5 text-violet ${syncingCrmLeadId === lead.id ? "animate-spin" : ""}`} />
+                      {syncingCrmLeadId === lead.id
+                        ? "Syncing..."
+                        : syncedCrmLeadIds[lead.id]
+                        ? "HubSpot Synced ✓"
+                        : "Sync to CRM"}
+                    </button>
+
                     {/* Vapi Riley Voice SDR Call Button */}
                     <button
                       onClick={() => handleTriggerCall(lead)}
@@ -887,6 +963,19 @@ export function LeadRadarModule({
               Ready for batch autonomous voice & WhatsApp outreach
             </p>
           </div>
+          <button
+            onClick={async () => {
+              for (const id of selectedLeads) {
+                const target = leads.find((l) => l.id === id);
+                if (target) {
+                  await handleSyncToCRM(target);
+                }
+              }
+            }}
+            className="border border-ink/30 bg-secondary px-3.5 py-2 label-mono text-xs font-bold text-ink hover:border-violet flex items-center gap-1.5 transition-all"
+          >
+            <Share2 className="w-3.5 h-3.5 text-violet" /> Sync {selectedLeads.length} to HubSpot
+          </button>
           <button
             onClick={() => {
               const target = leads.find((l) => l.id === selectedLeads[0]) || leads[0];

@@ -18,6 +18,7 @@ import {
   Video,
   Calendar as CalendarIcon,
   MessageSquare,
+  Share2,
   BarChart3,
   Settings,
   type LucideIcon,
@@ -94,6 +95,15 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
     badge: "Zero-TaxID",
     description: "Zero-verification WhatsApp Business gateway for automated post-call meeting links and requirements recap messaging.",
     componentPath: "modules/whatsapp",
+  },
+  {
+    id: "crm",
+    label: "CRM Sync",
+    icon: Share2,
+    enabled: true,
+    badge: "HubSpot",
+    description: "Automated bidirectional HubSpot CRM and outbound webhook pipeline synchronization.",
+    componentPath: "modules/crm",
   },
   {
     id: "analytics",

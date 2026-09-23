@@ -85,6 +85,7 @@ import { VoiceFleetModule } from "@/components/modules/voice";
 import { VideoMeetingModule } from "@/components/modules/video";
 import { CalendarModule } from "@/components/modules/calendar";
 import { WhatsAppModule } from "@/components/modules/whatsapp";
+import { CRMModule } from "@/components/modules/crm";
 import { AnalyticsModule } from "@/components/modules/analytics";
 import { SettingsModule } from "@/components/modules/settings";
 import { MODULE_REGISTRY } from "@/modules/registry";
@@ -2210,6 +2211,11 @@ function DashboardPage() {
             {/* 6. WhatsApp Business Gateway View */}
             {activeNav === "whatsapp" && (
               <WhatsAppModule companyName={activeCompanyInfo.name} />
+            )}
+
+            {/* 7. CRM Sync & Pipeline View */}
+            {activeNav === "crm" && (
+              <CRMModule companyName={activeCompanyInfo.name} />
             )}
 
             {/* 7. Analytics View */}
