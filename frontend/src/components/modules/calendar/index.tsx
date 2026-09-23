@@ -24,6 +24,8 @@ import {
   CheckSquare,
   Sparkles,
   Link2,
+  MessageSquare,
+  Send,
 } from "lucide-react";
 
 export interface CalendarEventRecord {
@@ -120,6 +122,31 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
   const triggerSuccess = (msg: string) => {
     setActionSuccessMsg(msg);
     setTimeout(() => setActionSuccessMsg(null), 4000);
+  };
+
+  // WhatsApp Dispatch Handler
+  const [waSending, setWaSending] = useState(false);
+  const [waResult, setWaResult] = useState<string | null>(null);
+
+  const handleSendWhatsApp = async (eventId: string, phone?: string) => {
+    try {
+      setWaSending(true);
+      setWaResult(null);
+      const url = `${API_BASE}/api/calendar/events/${eventId}/send-whatsapp${phone ? `?phone=${encodeURIComponent(phone)}` : ""}`;
+      const res = await fetch(url, { method: "POST" });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setWaResult("WhatsApp confirmation dispatched successfully! 🎉");
+        triggerSuccess("WhatsApp confirmation sent!");
+        fetchEvents();
+      } else {
+        setWaResult(data.error || data.detail || "Failed to dispatch WhatsApp message. Ensure gateway is connected.");
+      }
+    } catch (e: any) {
+      setWaResult(e.message || "Error contacting server");
+    } finally {
+      setWaSending(false);
+    }
   };
 
   // Quick Action: Mark Done ("completed")
@@ -1024,6 +1051,17 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
               </button>
 
               <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleSendWhatsApp(selectedEvent.id, selectedEvent.customer_phone)}
+                  disabled={waSending}
+                  className="flex items-center gap-1.5 px-3 py-2 label-mono text-xs font-bold border border-lime/50 bg-lime/10 text-lime-800 dark:text-lime hover:bg-lime/20 transition-all"
+                  title="Dispatch WhatsApp meeting invite with Google Meet link"
+                >
+                  <MessageSquare className="w-3.5 h-3.5 text-lime-600 dark:text-lime" />
+                  <span>{waSending ? "Sending..." : "Send WhatsApp"}</span>
+                </button>
+
                 <button
                   onClick={(e) => handleMarkDone(e, selectedEvent.id, selectedEvent.status)}
                   className={`flex items-center gap-1.5 px-4 py-2 label-mono text-xs font-bold border transition-all ${

@@ -24,16 +24,45 @@ MAX_TOTAL_DOC_CHARS = 35000
 MAX_PAGE_CHARS = 5000
 
 
+def _clean_domain_name(source_url: str) -> str:
+    domain = urlparse(source_url).netloc
+    domain = re.sub(r"^www\.", "", domain)
+    if domain:
+        parts = domain.split(".")
+        base = parts[0]
+        if base.lower() not in ["netlify", "vercel", "github", "render", "app", "pages", "drive", "docs"]:
+            # Insert space before camelcase and replace separators
+            base_spaced = re.sub(r"([a-z])([A-Z])", r"\1 \2", base)
+            base_spaced = re.sub(r"[_\-]+", " ", base_spaced)
+            return base_spaced.title()
+    return ""
+
+
 def _guess_company_name(
     source_url: str | None,
     pages: list[dict],
     business_description: str | None = None,
     processed_docs: list[dict] | None = None,
 ) -> str:
-    """Best-effort company name resolution with JSON-LD schema awareness."""
-    for page in pages:
+    """
+    Best-effort company name resolution.
+    Precedence:
+    1. og:site_name or Schema.org Organization name
+    2. Primary source_url domain (e.g. webscraper.io -> Webscraper)
+    3. User-provided business context
+    4. Processed document titles
+    5. Clean page title (only as last resort)
+    """
+    first_party_pages = [p for p in pages if p.get("tier") == "first_party"]
+    candidate_pages = first_party_pages if first_party_pages else pages
+
+    # 1. Check og:site_name and JSON-LD Organization on first-party pages
+    for page in candidate_pages:
         semantic = page.get("semantic_elements") or {}
-        # Check Schema.org organization name if present
+        site_name = semantic.get("site_name")
+        if site_name and len(site_name) < 60 and not site_name.lower().startswith(("home", "welcome", "untitled", "test site")):
+            return site_name.strip()
+
         for s in semantic.get("json_ld_schemas", []):
             if "Organization" in s or "LocalBusiness" in s or "Corporation" in s:
                 m = re.search(r"Name:\s*([^|]+)", s)
@@ -42,23 +71,13 @@ def _guess_company_name(
                     if cand and len(cand) < 60:
                         return cand
 
-        title = page.get("title", "")
-        if title and len(title) < 100:
-            name = re.split(r"[|\-–—:]", title)[0].strip()
-            # Clean common prefixes
-            name = re.sub(r"^(?:Welcome to\s+|Home\s+-\s+|Official Site\s+of\s+)", "", name, flags=re.IGNORECASE).strip()
-            if name and not name.lower().startswith(("home", "welcome", "index", "about us", "http", "untitled")):
-                return name
-
+    # 2. Check source_url domain name
     if source_url:
-        domain = urlparse(source_url).netloc
-        domain = re.sub(r"^www\.", "", domain)
-        if domain:
-            parts = domain.split(".")
-            base = parts[0].title()
-            if base.lower() not in ["netlify", "vercel", "github", "render", "app", "pages", "drive", "docs"]:
-                return base
+        cand_domain = _clean_domain_name(source_url)
+        if cand_domain:
+            return cand_domain
 
+    # 3. User-provided context
     if business_description:
         first_line = business_description.strip().split("\n")[0].strip()
         match = re.search(r"^(?:Company|Business|Name|Brand|Portfolio)?[:\-]?\s*([A-Za-z0-9\s&'.-]{2,40})", first_line, re.IGNORECASE)
@@ -67,6 +86,7 @@ def _guess_company_name(
             if len(extracted) > 1 and not extracted.lower().startswith(("i want", "we are", "i am", "a ", "the ")):
                 return extracted
 
+    # 4. Attached documents
     if processed_docs:
         ignored_prefixes = {
             "business", "analytics", "sales", "profile", "report", "deck", "data", "sheet",
@@ -81,6 +101,16 @@ def _guess_company_name(
             words = clean.split()
             if words and len(words[0]) > 2 and words[0].lower() not in ignored_prefixes:
                 return clean[:40]
+
+    # 5. Last resort: page title (preferring rightmost brand name after separator)
+    for page in pages:
+        title = page.get("title", "")
+        if title and len(title) < 100:
+            parts = re.split(r"[|\-–—:]", title)
+            cand = parts[-1].strip() if len(parts) > 1 else parts[0].strip()
+            cand = re.sub(r"^(?:Welcome to\s+|Home\s+-\s+|Official Site\s+of\s+)", "", cand, flags=re.IGNORECASE).strip()
+            if cand and not cand.lower().startswith(("home", "welcome", "index", "about us", "http", "untitled", "test site")):
+                return cand
 
     return "Business Entity"
 
@@ -204,6 +234,48 @@ def build_profile(
         "page_count": len(clean_pages),
         "doc_count": len(formatted_docs),
     }
+
+
+def trim_profile_dossier(profile: dict, max_chars: int) -> dict:
+    """
+    Trim a profile dossier to fit within a strict character ceiling:
+    1. Drop unverified_external pages first.
+    2. Drop trusted_enrichment pages if still over budget.
+    3. Trim the tail of long first_party pages.
+    Guarantees that first-party homepage and core documents are preserved.
+    """
+    pages = profile.get("pages", [])
+    total_chars = sum(len(p.get("text", "")) for p in pages)
+    if total_chars <= max_chars:
+        return profile
+
+    new_profile = dict(profile)
+    # Step 1: drop unverified_external pages
+    retained_pages = [p for p in pages if p.get("tier") != "unverified_external" and p.get("confidence", 0) >= 0.6]
+    total_chars = sum(len(p.get("text", "")) for p in retained_pages)
+
+    # Step 2: drop trusted_enrichment if still over budget
+    if total_chars > max_chars:
+        first_party = [p for p in retained_pages if p.get("tier") == "first_party"]
+        if first_party:
+            retained_pages = first_party
+            total_chars = sum(len(p.get("text", "")) for p in retained_pages)
+
+    # Step 3: trim the tail of long pages
+    if total_chars > max_chars and retained_pages:
+        per_page_budget = max(800, max_chars // len(retained_pages))
+        trimmed_pages = []
+        for p in retained_pages:
+            p_copy = dict(p)
+            text = p_copy.get("text", "")
+            if len(text) > per_page_budget:
+                p_copy["text"] = _truncate_text(text, per_page_budget)
+            trimmed_pages.append(p_copy)
+        retained_pages = trimmed_pages
+
+    new_profile["pages"] = retained_pages
+    new_profile["page_count"] = len(retained_pages)
+    return new_profile
 
 
 def profile_to_markdown(profile: dict) -> str:

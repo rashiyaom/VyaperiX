@@ -6,6 +6,7 @@
   "scripts": {
     "dev:web": "npm --prefix frontend run dev",
     "dev:backend": "cd backend && python -m uvicorn app.main:app --reload --port 8000",
+    "dev:whatsapp": "npm --prefix whatsapp-gateway run start",
     "build:web": "npm --prefix frontend run build"
   }
 }
