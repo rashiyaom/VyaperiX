@@ -41,6 +41,7 @@ from app.routers import voice_router
 from app.routers import video_router
 from app.routers import calendar_router
 from app.routers import profile_router
+from app.routers import whatsapp_router
 from app.services.search.router import get_search_router
 from config.domain_trust import classify_and_filter
 
@@ -84,11 +85,14 @@ app.include_router(video_router.router, prefix="/api/video", tags=["Video Sales 
 # Mount Calendar & Scheduled Meetings Router
 app.include_router(calendar_router.router, prefix="/api/calendar", tags=["Calendar & Meetings"])
 
+# Mount WhatsApp Integration Router
+app.include_router(whatsapp_router.router, prefix="/api/whatsapp", tags=["WhatsApp"])
+
 # Mount User Profile Router (backed by MongoDB)
 app.include_router(profile_router.router, prefix="/api/profile", tags=["User Profile"])
 
 # Also expose Vapi, Sarvam & Tavus Webhooks and Outbound at root path level for compatibility
-app.add_api_route("/webhook/vapi/custom-voice", voice_router.vapi_custom_voice_webhook, methods=["POST"], tags=["Voice Fleet Webhook"])
+app.add_api_route("/webhook/vapi/custom-voice", voice_router.vapi_custom_voice_webhook, methods=["GET", "POST", "HEAD"], tags=["Voice Fleet Webhook"])
 app.add_api_route("/webhook/vapi", voice_router.vapi_webhook, methods=["POST"], tags=["Voice Fleet Webhook"])
 app.add_api_route("/webhook/tavus", video_router.tavus_webhook, methods=["POST"], tags=["Video Sales Agent Webhook"])
 app.add_api_route("/sarvam/webhook", voice_router.sarvam_webhook, methods=["POST"], tags=["Sarvam Webhook"])

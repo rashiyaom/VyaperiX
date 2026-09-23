@@ -157,6 +157,8 @@ Full Conversation Transcript:
             "company_name": business_name,
             "title": parsed.get("title") or f"Meeting with {customer_name or 'Customer'}",
             "description": parsed.get("agenda") or parsed.get("notes") or "",
+            "agenda": parsed.get("agenda") or "",
+            "notes": parsed.get("notes") or "",
             "start_time": start_iso,
             "end_time": end_iso,
             "meeting_type": meeting_type,
@@ -292,9 +294,27 @@ async def auto_book_meeting_from_call(
         meeting_info["meet_url"] = sync_res["meet_url"]
     if sync_res.get("google_event_id"):
         meeting_info["google_event_id"] = sync_res["google_event_id"]
-        meeting_info["synced_to_google"] = True
-
     event_id = await db.create_calendar_event(meeting_info, user_id=user_id)
     meeting_info["id"] = event_id
     logger.info(f"Successfully auto-booked calendar event {event_id} for call {call_id} (Customer: {customer_name})")
+
+    # Automatically dispatch WhatsApp confirmation with Google Meet link & agenda
+    target_phone = meeting_info.get("customer_phone") or customer_phone
+    if target_phone:
+        try:
+            from app.services import whatsapp_service
+            wa_res = await whatsapp_service.send_meeting_confirmation(
+                customer_name=meeting_info.get("customer_name") or customer_name or "there",
+                customer_phone=target_phone,
+                business_name=business_name or meeting_info.get("company_name") or "Vyepari X",
+                start_time=meeting_info.get("start_time") or "",
+                meet_url=meeting_info.get("meet_url") or "",
+                agenda=meeting_info.get("agenda") or meeting_info.get("description") or "",
+                requirements=meeting_info.get("notes") or "",
+            )
+            meeting_info["whatsapp_status"] = "sent" if wa_res.get("success") else "failed"
+            logger.info(f"WhatsApp meeting confirmation dispatch for event {event_id}: {wa_res.get('success')}")
+        except Exception as wa_err:
+            logger.warning(f"Error dispatching WhatsApp meeting confirmation for event {event_id}: {wa_err}")
+
     return meeting_info

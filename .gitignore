@@ -1,127 +1,46 @@
-# ==========================================
-# VyaperiX Root .gitignore
-# ==========================================
-
-# ------------------------------------------
-# Dependencies & Package Managers
-# ------------------------------------------
+# Dependencies
 node_modules/
-**/node_modules/
-.pnp/
+.pnp
 .pnp.js
-.yarn/cache/
-.yarn/unplugged/
-.yarn/build-state.yml
-.yarn/install-state.gz
 
-# ------------------------------------------
-# Environment Variables & Secrets (CRITICAL)
-# ------------------------------------------
-.env
-.env.*
-*.env
-*.env.*
-# Keep example / template files tracked
-!.env.example
-!.env.*.example
-!*.env.example
-!backend/.env.example
-!frontend/.env.example
+# Build Outputs & Caches
+dist/
+.output/
+.tanstack/
+.vercel
+.turbo
 
-# ------------------------------------------
-# WhatsApp Gateway (Baileys Session & Auth)
-# ------------------------------------------
-whatsapp-gateway/auth_info/
-whatsapp-gateway/auth_info_baileys/
-whatsapp-gateway/session*/
-whatsapp-gateway/.auth/
-
-# ------------------------------------------
-# Python & FastAPI Backends
-# ------------------------------------------
+# Python & FastAPI
 __pycache__/
-**/__pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
-
-# Python Virtual Environments
-.venv/
-**/.venv/
-venv/
-**/venv/
 env/
-**/env/
+venv/
 ENV/
 env.bak/
 venv.bak/
-
-# Python Build & Test Caches
-*.egg-info/
-.installed.cfg
-*.egg
-build/
-develop-eggs/
-downloads/
-eggs/
-.eggs/
-parts/
-var/
-wheels/
-share/python-wheels/
 .pytest_cache/
-.mypy_cache/
-.ruff_cache/
-htmlcov/
-.coverage
-.coverage.*
-.hypothesis/
-
-# ------------------------------------------
-# Frontend Build Outputs & Caches
-# ------------------------------------------
-dist/
-**/dist/
-.output/
-**/.output/
-.tanstack/
-.vercel
-.turbo
-.next/
-out/
-.eslintcache
-*.tsbuildinfo
-.vite/
-
-# ------------------------------------------
-# Databases & Local Storage
-# ------------------------------------------
 *.sqlite
 *.sqlite3
 *.db
 mongodb_data/
-**/mongodb_data/
 backend/mongodb_data/
+
+# Environment & Secrets (NEVER COMMIT)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+whatsapp-gateway/auth_info/
+
+# Supabase Local Temp
 supabase/.temp/
 .temp/
-tmp/
-temp/
 
-# ------------------------------------------
-# Logs & Process Artifacts
-# ------------------------------------------
-*.log
-logs/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
-
-# ------------------------------------------
-# Operating System Files
-# ------------------------------------------
+# OS Files
 .DS_Store
 .DS_Store?
 ._*
@@ -129,26 +48,8 @@ lerna-debug.log*
 .Trashes
 ehthumbs.db
 Thumbs.db
-[Dd]esktop.ini
 
-# ------------------------------------------
-# IDE & Editor Configurations
-# ------------------------------------------
-.idea/
-*.sublime-project
-*.sublime-workspace
-.vscode/*
-!.vscode/settings.json
-!.vscode/tasks.json
-!.vscode/launch.json
-!.vscode/extensions.json
-*.swp
-*.swo
-*~
-
-# ------------------------------------------
-# Video, Heavy Media & ML Artifacts
-# ------------------------------------------
+# Video files & heavy submodules (do not push to repo)
 drive-download-*/
 tools/upscayl-repo/
 tools/*.webp
@@ -156,3 +57,8 @@ tools/*.png
 tools/model_tests/
 frontend/public/sample_4k/*.png
 !frontend/public/videos/*.mp4
+
+# MongoDB local storage
+mongodb_data/
+backend/mongodb_data/
+
