@@ -62,3 +62,7 @@ frontend/public/sample_4k/*.png
 mongodb_data/
 backend/mongodb_data/
 
+# Phase 0 & measurement metrics logs (local only — never commit)
+backend/logs/*
+!backend/logs/.gitkeep
+

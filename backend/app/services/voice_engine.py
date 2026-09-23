@@ -149,10 +149,10 @@ CONVERSATION TRANSCRIPT:
 
 Provide the structured post-call JSON review now."""
 
-    client = groq_client._get_client()
-
-    for target_model in groq_client.PREFERRED_MODELS:
+    target_model = "llama-3.3-70b-versatile"
+    for attempt in range(2):  # Short timeout, max 1 retry
         try:
+            client = groq_client._get_client()
             resp = client.chat.completions.create(
                 model=target_model,
                 messages=[
@@ -161,6 +161,7 @@ Provide the structured post-call JSON review now."""
                 ],
                 temperature=0.15,
                 max_tokens=1200,
+                timeout=10.0,
                 response_format={"type": "json_object"},
             )
             raw = groq_client._strip_json_fences(resp.choices[0].message.content or "")
@@ -171,7 +172,7 @@ Provide the structured post-call JSON review now."""
                 data["lead_temperature"] = "Hot" if data["intent_score"] >= 75 else ("Warm" if data["intent_score"] >= 45 else "Cold")
             return data
         except Exception as e:
-            logger.warning(f"Groq call analysis with {target_model} failed: {e}. Trying fallback...")
+            logger.warning(f"Groq call analysis with {target_model} attempt {attempt + 1} failed: {e}. Trying fallback...")
             continue
 
     # Deterministic fallback if API fails

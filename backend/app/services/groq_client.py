@@ -11,11 +11,14 @@ import json
 import logging
 import os
 import re
+import time
 from typing import Any
 
 from dotenv import load_dotenv
 from groq import Groq
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
+
+from app.services._metrics import emit as _emit_metric  # Phase 0 — timing only
 
 load_dotenv()
 
@@ -329,13 +332,27 @@ def _get_client() -> Groq:
     api_key = os.environ.get("GROQ_API_KEY")
     if not api_key:
         raise RuntimeError("GROQ_API_KEY environment variable not set")
-    return Groq(api_key=api_key)
+    return Groq(api_key=api_key, max_retries=0)
 
 
 def _strip_json_fences(text: str) -> str:
     text = text.strip()
     text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
     text = re.sub(r"\s*```$", "", text)
+    # If standard json load works, return as-is
+    try:
+        json.loads(text)
+        return text
+    except Exception:
+        pass
+    # Attempt to locate the outermost balanced JSON object
+    start = text.find("{")
+    if start != -1:
+        try:
+            obj, _ = json.JSONDecoder().raw_decode(text[start:])
+            return json.dumps(obj)
+        except Exception:
+            pass
     match = re.search(r"(\{[\s\S]*\})", text)
     if match:
         return match.group(1).strip()
@@ -412,6 +429,7 @@ def analyze_single_document(doc_name: str, doc_type: str, content_text: str) -> 
     user_msg = f"DOCUMENT: {doc_name} (Format: {doc_type})\n\nCONTENT:\n{content_text[:12000]}"
 
     for target_model in PREFERRED_MODELS:
+        _t_llm = time.monotonic()
         try:
             resp = client.chat.completions.create(
                 model=target_model,
@@ -423,12 +441,23 @@ def analyze_single_document(doc_name: str, doc_type: str, content_text: str) -> 
                 max_tokens=3000,
                 response_format={"type": "json_object"},
             )
+            _emit_metric({
+                "event": "llm_call", "provider": "groq", "model": target_model,
+                "fn": "analyze_single_document",
+                "ms": round((time.monotonic() - _t_llm) * 1000), "status": "ok",
+            })
             raw = _strip_json_fences(resp.choices[0].message.content or "")
             data = json.loads(raw)
             data["source_name"] = doc_name
             data["source_type"] = doc_type
             return DocumentInsight.model_validate(data)
         except Exception as e:
+            _emit_metric({
+                "event": "llm_call", "provider": "groq", "model": target_model,
+                "fn": "analyze_single_document",
+                "ms": round((time.monotonic() - _t_llm) * 1000), "status": "error",
+                "error": str(e)[:120],
+            })
             logger.warning(f"Single doc analysis on {target_model} for {doc_name} failed: {e}. Trying next model...")
             continue
 
@@ -553,6 +582,7 @@ def _synthesize_with_gemini(
 
         resp = None
         for m in models_to_try:
+            _t_gem = time.monotonic()
             try:
                 logger.info(f"Synthesizing business intelligence with Gemini ({m})...")
                 resp = client.models.generate_content(
@@ -561,9 +591,20 @@ def _synthesize_with_gemini(
                     config={"response_mime_type": "application/json"}
                 )
                 if resp and resp.text:
+                    _emit_metric({
+                        "event": "llm_call", "provider": "gemini", "model": m,
+                        "fn": "_synthesize_with_gemini",
+                        "ms": round((time.monotonic() - _t_gem) * 1000), "status": "ok",
+                    })
                     logger.info(f"Gemini synthesis succeeded with model {m} ✓")
                     break
             except Exception as g_err:
+                _emit_metric({
+                    "event": "llm_call", "provider": "gemini", "model": m,
+                    "fn": "_synthesize_with_gemini",
+                    "ms": round((time.monotonic() - _t_gem) * 1000), "status": "error",
+                    "error": str(g_err)[:120],
+                })
                 logger.warning(f"Gemini synthesis with model {m} failed: {g_err}")
                 continue
 
@@ -598,7 +639,7 @@ def _synthesize_with_gemini(
 
 
 def analyze_business(
-    profile_markdown: str,
+    profile_markdown: str | dict,
     linkedin_url: str | None = None,
     extra_links: list[str] | None = None,
     doc_count: int = 0,
@@ -615,6 +656,10 @@ Source: {data_engine_figures.get('source_file')}
 Summary: {data_engine_figures.get('data_source_summary')}
 Incorporate these exact numbers into the executive summary, SWOT, and tactical recommendations.
 """
+
+    if isinstance(profile_markdown, dict):
+        from app.services.normalizer import profile_to_markdown
+        profile_markdown = profile_to_markdown(profile_markdown)
 
     # Use RAG-retrieved context if available (focused, grounded), else full profile
     if rag_context and rag_context.strip():
@@ -690,6 +735,7 @@ Return ONLY valid JSON matching the schema.
     last_error = None
     for target_model in candidate_models:
         safe_max_tokens = 1800 if "qwen" in target_model.lower() else 3500
+        _t_llm = time.monotonic()
 
         logger.info(f"Calling Groq Global Synthesis (model={target_model}, max_tokens={safe_max_tokens})...")
         try:
@@ -717,6 +763,11 @@ Return ONLY valid JSON matching the schema.
             raw = _strip_json_fences(raw)
 
             data = json.loads(raw)
+            _emit_metric({
+                "event": "llm_call", "provider": "groq", "model": target_model,
+                "fn": "analyze_business",
+                "ms": round((time.monotonic() - _t_llm) * 1000), "status": "ok",
+            })
             # Inject guaranteed individual document insights if provided
             if individual_doc_insights:
                 data["document_insights"] = [d.model_dump() for d in individual_doc_insights]
@@ -747,6 +798,12 @@ Return ONLY valid JSON matching the schema.
             return BusinessAnalysis.model_validate(data)
 
         except Exception as api_err:
+            _emit_metric({
+                "event": "llm_call", "provider": "groq", "model": target_model,
+                "fn": "analyze_business",
+                "ms": round((time.monotonic() - _t_llm) * 1000), "status": "error",
+                "error": str(api_err)[:120],
+            })
             err_str = str(api_err)
             logger.warning(f"Model {target_model} error: {err_str}. Trying next candidate...")
             last_error = api_err
@@ -763,3 +820,159 @@ Return ONLY valid JSON matching the schema.
         return gemini_result
 
     raise RuntimeError(f"Both Groq and Gemini API failed to synthesize report. Groq error: {last_error}")
+
+
+# ─────────────────────────── Async Variants (LLM Router) ─────────────────
+
+async def analyze_single_document_async(doc_name: str, doc_type: str, content_text: str) -> DocumentInsight:
+    """Async variant using llm_router with per-model circuit breaker + retry."""
+    cleaned = (content_text or "").strip()
+    unreadable_prefixes = (
+        "(Could not",
+        "(No readable text",
+        "(Vision model processed",
+        "(DOCX contained no text",
+        "(Spreadsheet contained no data",
+        "(pandas not installed",
+        "(PDF contained no",
+    )
+    if not cleaned or any(cleaned.startswith(p) for p in unreadable_prefixes) or len(cleaned) < 15:
+        return DocumentInsight(
+            source_name=doc_name,
+            source_type=doc_type,
+            document_purpose="Visual asset or file without extractable textual/numerical records.",
+            key_findings=[f"No readable text or quantitative records detected in {doc_name}."],
+            extracted_metrics=[],
+            strengths_identified=[],
+            risks_or_red_flags=[f"Asset {doc_name} did not yield structured records."],
+            verifiable_quotes=[],
+        )
+
+    user_msg = f"DOCUMENT: {doc_name} (Format: {doc_type})\n\nCONTENT:\n{content_text[:12000]}"
+    try:
+        from app.services.llm_router import call_with_fallback
+        raw = await call_with_fallback(
+            prompt=user_msg,
+            system=SINGLE_DOC_PROMPT,
+            max_tokens=3000,
+            temperature=0.1,
+        )
+        raw = _strip_json_fences(raw)
+        data = json.loads(raw)
+        data["source_name"] = doc_name
+        data["source_type"] = doc_type
+        return DocumentInsight.model_validate(data)
+    except Exception as e:
+        logger.warning(f"Async single doc analysis failed for {doc_name}: {e}. Returning fallback.")
+        return DocumentInsight(
+            source_name=doc_name,
+            source_type=doc_type,
+            document_purpose=f"Analysis of {doc_name}",
+            key_findings=[f"Document {doc_name} successfully ingested into intelligence pipeline."],
+            extracted_metrics=[],
+            verifiable_quotes=[],
+        )
+
+
+async def analyze_business_async(
+    profile_markdown: str | dict,
+    linkedin_url: str | None = None,
+    extra_links: list[str] | None = None,
+    doc_count: int = 0,
+    individual_doc_insights: list[DocumentInsight] | None = None,
+    data_engine_figures: dict | None = None,
+    model: str | None = None,
+    rag_context: str | None = None,
+) -> BusinessAnalysis:
+    """Async variant using llm_router with per-model circuit breaker + retry."""
+    from app.services.llm_router import call_with_fallback, default_provider_models, get_model_tpm
+    from app.services.normalizer import profile_to_markdown, trim_profile_dossier
+
+    # Route Gemini first for large merged synthesis (1M+ context / high TPM); keep Groq as fallback
+    provider_models = default_provider_models(large_context=True)
+    if model:
+        provider_models = [("groq", model)] + [pm for pm in provider_models if pm[1] != model]
+
+    file_note = ""
+    if data_engine_figures and data_engine_figures.get("has_file_data"):
+        file_note = f"""
+CRITICAL GROUND TRUTH DETERMINISTIC METRICS EXTRACTED DIRECTLY FROM UPLOADED FILE:
+Source: {data_engine_figures.get('source_file')}
+Summary: {data_engine_figures.get('data_source_summary')}
+Incorporate these exact numbers into the executive summary, SWOT, and tactical recommendations.
+"""
+
+    if isinstance(profile_markdown, dict):
+        first_provider, first_model = provider_models[0]
+        if first_provider == "groq":
+            tpm = get_model_tpm(first_model)
+            max_chars = max(4000, int((tpm * 0.8 - 3500 - 200) * 4))
+            profile_markdown = trim_profile_dossier(profile_markdown, max_chars=max_chars)
+        profile_markdown = profile_to_markdown(profile_markdown)
+
+    if rag_context and rag_context.strip():
+        primary_content = rag_context
+        content_note = (
+            "NOTE: The DOSSIER below was assembled by semantic retrieval (RAG) — only the most "
+            "relevant document and web chunks are shown. Base ALL findings strictly on this retrieved evidence."
+        )
+        logger.info("analyze_business_async: Using RAG-retrieved context for synthesis (grounded mode)")
+    else:
+        primary_content = profile_markdown
+        content_note = "NOTE: Full scraped profile dossier provided below."
+        logger.info("analyze_business_async: Using full profile markdown for synthesis (fallback mode)")
+
+    groq_content = _truncate_text_for_groq(primary_content, max_chars=24000)
+    groq_user_prompt = f"""DOSSIER WITH {doc_count} ATTACHED DOCUMENTS & WEB ASSETS:
+================================================================================
+{content_note}
+
+{groq_content}
+================================================================================
+{file_note}
+CRITICAL INSTRUCTIONS:
+1. Populate EVERY section in the JSON schema with concrete, high-precision findings derived from the dossier:
+   - target_customers (3-5 specific buyer personas with estimated deal size and pain points)
+   - products_services (3-6 specific products/services extracted from the dossier with differentiators and pricing)
+   - current_marketing_channels (3-5 channels with evidence and strength)
+   - swot_analysis (at least 3-4 distinct bullets in EACH quadrant: strengths, weaknesses, opportunities, threats)
+   - recommendations (4-6 prioritized playbooks with clear action steps, timeframe, and expected ROI)
+   - growth_forecast: STRICT GROUND TRUTH: ONLY populate if exact numerical time-series revenue ledgers are present in the dossier. If no verified financial ledger exists, return [] (empty list). NEVER invent or simulate revenue figures.
+   - conversion_funnel: STRICT GROUND TRUTH: ONLY populate if actual stage/pipeline records are present in the dossier. If no stage records exist, return [] (empty list). NEVER invent pipeline stages.
+   - timeline_roadmap: MUST provide exactly 4 distinct execution phases (Days 0–30, Days 30–60, Days 60–90, Days 90–180) with measurable target_metric and 3 actionable deliverables tailored to their catalog
+   - financial_highlights: 3-5 concrete commercial and financial metrics
+2. Calculate opportunity_score (0-100) and confidence_score (75-98) dynamically based on the company's upside and evidence depth.
+
+Return ONLY valid JSON matching the schema.
+"""
+
+    raw = await call_with_fallback(
+        prompt=groq_user_prompt,
+        system=GLOBAL_SYNTHESIS_PROMPT,
+        max_tokens=3500,
+        temperature=0.2,
+        provider_models=provider_models,
+        large_context=True,
+    )
+    raw = _strip_json_fences(raw)
+    data = json.loads(raw)
+
+    if individual_doc_insights:
+        data["document_insights"] = [d.model_dump() for d in individual_doc_insights]
+
+    if data_engine_figures:
+        data["data_source_mode"] = data_engine_figures.get("data_source_mode", "website_inferred")
+        data["data_source_summary"] = data_engine_figures.get("data_source_summary", "")
+        data["growth_forecast"] = data_engine_figures.get("growth_forecast") or []
+        data["conversion_funnel"] = data_engine_figures.get("conversion_funnel") or []
+        if data_engine_figures.get("timeline_roadmap"):
+            data["timeline_roadmap"] = data_engine_figures["timeline_roadmap"]
+        if data_engine_figures.get("financial_highlights"):
+            existing_fins = data.get("financial_highlights") or []
+            file_fins = data_engine_figures["financial_highlights"]
+            file_names = {f["metric_name"] for f in file_fins if isinstance(f, dict)}
+            data["financial_highlights"] = file_fins + [
+                f for f in existing_fins if (isinstance(f, dict) and f.get("metric_name") not in file_names)
+            ]
+
+    return BusinessAnalysis.model_validate(data)

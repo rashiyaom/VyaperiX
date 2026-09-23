@@ -56,6 +56,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     await db.init_db()
     yield
+    await scraper.close_playwright()
 
 
 # ─────────────────────────── App Setup ─────────────────────────────────
@@ -431,24 +432,28 @@ async def run_pipeline(
         await db.update_status(report_id, "analyzing")
         logger.info(f"[{report_id}] Running dedicated extraction on {len(processed_docs)} documents...")
 
-        individual_insights = []
-        for doc in processed_docs:
-            fname = doc.get("filename", "Document")
-            ftype = doc.get("doc_type", "document")
-            content = doc.get("content_text") or doc.get("content", "")
-            if content and not doc.get("error"):
-                insight = groq_client.analyze_single_document(fname, ftype, content)
-                individual_insights.append(insight)
+        doc_coros = [
+            groq_client.analyze_single_document_async(
+                doc.get("filename", "Document"),
+                doc.get("doc_type", "document"),
+                doc.get("content_text") or doc.get("content", ""),
+            )
+            for doc in processed_docs
+            if (doc.get("content_text") or doc.get("content")) and not doc.get("error")
+        ]
 
         # If website scraped, also add a website deep-dive entry
         if pages:
             web_summary_text = "\n\n".join([f"Page: {p.get('title')}\n{p.get('text')[:1000]}" for p in pages[:4]])
-            web_insight = groq_client.analyze_single_document(
-                doc_name=website_url or "Public Website",
-                doc_type="website",
-                content_text=web_summary_text,
+            doc_coros.append(
+                groq_client.analyze_single_document_async(
+                    doc_name=website_url or "Public Website",
+                    doc_type="website",
+                    content_text=web_summary_text,
+                )
             )
-            individual_insights.append(web_insight)
+
+        individual_insights = list(await asyncio.gather(*doc_coros)) if doc_coros else []
 
         # ── Phase 4.5: Deterministic Numerical Extraction & Diagram Generation ──
         data_engine_figures = None
@@ -514,7 +519,7 @@ async def run_pipeline(
 
         # ── Phase 5: Tier 2 Global Commercial Synthesis ───────────────
         logger.info(f"[{report_id}] Running global commercial synthesis...")
-        analysis = groq_client.analyze_business(
+        analysis = await groq_client.analyze_business_async(
             profile_markdown=profile_md,
             linkedin_url=linkedin_url,
             extra_links=other_links,
