@@ -87,6 +87,7 @@ async def get_credentials() -> dict:
         "vapi_api_key": vapi_key,
         "vapi_public_key": db_settings.get("vapi_public_key") or os.getenv("VAPI_PUBLIC_KEY", ""),
         "vapi_phone_number_id": phone_number_id,
+        "vapi_assistant_id": db_settings.get("vapi_assistant_id") or os.getenv("VAPI_ASSISTANT_ID", "bc8c9e80-e927-4b22-a3c6-97f5c7c6293d"),
         "twilio_account_sid": db_settings.get("twilio_account_sid") or os.getenv("TWILIO_ACCOUNT_SID", ""),
         "twilio_auth_token": db_settings.get("twilio_auth_token") or os.getenv("TWILIO_AUTH_TOKEN", ""),
         "twilio_phone_number": db_settings.get("twilio_phone_number") or os.getenv("TWILIO_PHONE_NUMBER", ""),
@@ -553,14 +554,36 @@ async def dispatch_vapi_call(
     if public_base_url:
         assistant_config["serverUrl"] = f"{public_base_url.rstrip('/')}/webhook/vapi"
 
-    payload = {
-        "phoneNumberId": phone_number_id,
-        "customer": {
-            "number": phone_clean,
-            "name": customer_name,
-        },
-        "assistant": assistant_config,
-    }
+    assistant_id = creds.get("vapi_assistant_id") or os.getenv("VAPI_ASSISTANT_ID")
+    if assistant_id:
+        overrides = {
+            "firstMessage": first_message,
+            "variableValues": {
+                "customer_name": customer_name,
+                "business_name": business_name,
+                "call_reason": call_reason,
+            },
+        }
+        if public_base_url:
+            overrides["serverUrl"] = f"{public_base_url.rstrip('/')}/webhook/vapi"
+        payload = {
+            "phoneNumberId": phone_number_id,
+            "customer": {
+                "number": phone_clean,
+                "name": customer_name,
+            },
+            "assistantId": assistant_id,
+            "assistantOverrides": overrides,
+        }
+    else:
+        payload = {
+            "phoneNumberId": phone_number_id,
+            "customer": {
+                "number": phone_clean,
+                "name": customer_name,
+            },
+            "assistant": assistant_config,
+        }
 
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:

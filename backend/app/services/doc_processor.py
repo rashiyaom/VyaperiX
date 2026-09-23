@@ -511,9 +511,6 @@ def extract_image_description(
                 return f"**Visual Intelligence Extraction for {filename}:**\n\n{resp.text.strip()}", "gemini_vision"
         except Exception as e:
             logger.warning(f"Gemini vision failed for {filename}: {e}")
-                    continue
-        except Exception as e:
-            logger.warning(f"Groq vision fallback failed for {filename}: {e}")
 
     return f"(No readable text or quantitative data detected in {filename})", "gemini_vision"
 
