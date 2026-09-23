@@ -437,11 +437,12 @@ Output STRICT JSON only: {{"evaluations": [...]}}
         call_id = str(uuid.uuid4())
         call_reason = lead.get("personalized_pitch") or f"Consultation on AI Sales Intelligence for {lead.get('company')}"
 
+        safe_company_name = (lead.get("company", "Prospect") or "Prospect").strip()[:38]
         call_data = {
             "id": call_id,
             "user_id": user_id,
             "direction": "outbound",
-            "customer_name": lead.get("company", "Prospect"),
+            "customer_name": safe_company_name,
             "customer_phone": target_phone,
             "business_name": business_name or "VyaperiX",
             "call_reason": call_reason,
@@ -457,7 +458,7 @@ Output STRICT JSON only: {{"evaluations": [...]}}
         asyncio.create_task(
             voice_engine.dispatch_outbound_call(
                 call_id=call_id,
-                customer_name=lead.get("company", "Prospect"),
+                customer_name=safe_company_name,
                 customer_phone=target_phone,
                 business_name=business_name or "VyaperiX",
                 call_reason=call_reason,

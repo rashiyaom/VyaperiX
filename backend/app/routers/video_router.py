@@ -140,15 +140,12 @@ async def start_video_meeting(
             detail="Report does not belong to the authenticated user.",
         )
 
-    # Auto-associate report with the active user if unassigned or updated
+    # Auto-associate report with the active user if unassigned or updated (strictly MongoDB)
     if user_id_str and report_user_id != user_id_str:
         try:
-            client = db.get_supabase()
-            await asyncio.to_thread(
-                client.table("reports").update({"user_id": user_id_str}).eq("id", report_id).execute
-            )
-        except Exception:
-            pass
+            await db.update_report(report_id, {"user_id": user_id_str})
+        except Exception as e:
+            logger.warning(f"Could not associate report {report_id} to user {user_id_str} in MongoDB: {e}")
 
     # 3. Check report status (400 if not 'done')
     report_status = report.get("status")

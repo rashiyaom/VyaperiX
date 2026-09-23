@@ -320,6 +320,25 @@ async def update_analysis(report_id: str, analysis: dict):
     except Exception as e:
         logger.warning(f"MongoDB update_analysis error for {report_id}: {e}")
 
+async def update_report(report_id: str, updates: dict) -> Optional[dict]:
+    """Update arbitrary fields on a commercial due diligence report in MongoDB and memory."""
+    clean_updates = dict(updates)
+    clean_updates["updated_at"] = _now()
+    if report_id in _in_memory_reports:
+        _in_memory_reports[report_id].update(clean_updates)
+
+    if _mongo_connected:
+        try:
+            db = get_mongo_db()
+            await db["reports"].update_one({"id": report_id}, {"$set": clean_updates})
+            doc = await db["reports"].find_one({"id": report_id})
+            if doc:
+                return _clean_doc(doc)
+        except Exception as e:
+            logger.warning(f"MongoDB update_report error for {report_id}: {e}")
+
+    return _in_memory_reports.get(report_id)
+
 def _ensure_visual_intelligence(report: dict) -> tuple[dict, bool]:
     """Ensures timeline_roadmap is present for visual presentation."""
     analysis = report.get("analysis")

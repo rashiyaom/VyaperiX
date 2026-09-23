@@ -61,4 +61,5 @@ frontend/public/sample_4k/*.png
 # MongoDB local storage
 mongodb_data/
 backend/mongodb_data/
+backend/data/
 
