@@ -3,7 +3,7 @@ import type { Session, User } from "@supabase/supabase-js";
 import { useGoogleLogin } from "@react-oauth/google";
 import { supabase } from "./supabase";
 
-const API_BASE = (import.meta.env["VITE_SCRAPER_API_BASE"] as string) || "http://localhost:8000";
+const API_BASE = (import.meta.env["VITE_SCRAPER_API_BASE"] as string) || "http://127.0.0.1:8000";
 
 export interface UserProfile {
   id: string;
