@@ -461,6 +461,29 @@ def extract_image_description(
     ext = os.path.splitext(filename.lower())[1].lstrip(".")
     mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp"}.get(ext, "image/png")
 
+    if groq_api_key:
+        try:
+            from groq import Groq  # type: ignore
+            client = Groq(api_key=groq_api_key)
+            b64 = base64.b64encode(content_bytes).decode()
+            for model in ["llama-3.2-11b-vision-preview", "llama-3.2-90b-vision-preview"]:
+                try:
+                    resp = client.chat.completions.create(
+                        model=model,
+                        messages=[{"role": "user", "content": [
+                            {"type": "text", "text": f"You are a rigorous commercial auditor analyzing an uploaded business image: {filename}. Extract ALL readable text, metrics, numbers, tables, column headers, axis values, dates, customer names, financial figures, and operational facts."},
+                            {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
+                        ]}],
+                        temperature=0.1, max_tokens=1000,
+                    )
+                    text = resp.choices[0].message.content or ""
+                    if text.strip():
+                        return f"**Visual Analysis of {filename}:**\n\n{text.strip()}", "groq_vision"
+                except Exception:
+                    continue
+        except Exception as e:
+            logger.warning(f"Groq vision failed for {filename}: {e}. Trying Gemini fallback...")
+
     gemini_key = os.environ.get("GEMINI_API_KEY", "")
     if gemini_key:
         try:
@@ -487,27 +510,7 @@ def extract_image_description(
             if resp and resp.text and len(resp.text.strip()) > 5:
                 return f"**Visual Intelligence Extraction for {filename}:**\n\n{resp.text.strip()}", "gemini_vision"
         except Exception as e:
-            logger.warning(f"Gemini vision failed for {filename}: {e}. Trying Groq...")
-
-    if groq_api_key:
-        try:
-            from groq import Groq  # type: ignore
-            client = Groq(api_key=groq_api_key)
-            b64 = base64.b64encode(content_bytes).decode()
-            for model in ["llama-3.2-11b-vision-preview", "llama-3.2-90b-vision-preview"]:
-                try:
-                    resp = client.chat.completions.create(
-                        model=model,
-                        messages=[{"role": "user", "content": [
-                            {"type": "text", "text": f"Extract all visible text and numbers from {filename}."},
-                            {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
-                        ]}],
-                        temperature=0.1, max_tokens=1000,
-                    )
-                    text = resp.choices[0].message.content or ""
-                    if text.strip():
-                        return f"**Visual Analysis of {filename}:**\n\n{text.strip()}", "groq_vision"
-                except Exception:
+            logger.warning(f"Gemini vision failed for {filename}: {e}")
                     continue
         except Exception as e:
             logger.warning(f"Groq vision fallback failed for {filename}: {e}")

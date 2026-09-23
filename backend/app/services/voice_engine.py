@@ -201,8 +201,26 @@ async def _maybe_auto_book_calendar(
     business_name: Optional[str] = None,
     user_id: Optional[str] = None,
 ):
-    """If post-call review or transcript indicates a meeting was booked/requested, extract details and create calendar event."""
+    """
+    Post-call automation:
+    1. If meeting intent was detected or transcript has sufficient dialogue, extracts details,
+       books calendar event (with Google Meet link) and dispatches a WhatsApp meeting confirmation.
+    2. If no meeting was booked, but customer phone is known, dispatches a WhatsApp requirements recap
+       and next steps to keep the lead engaged.
+    """
     try:
+        # Fallback resolve phone and names from DB if missing
+        if not customer_phone or not customer_name:
+            try:
+                db_c = await db.get_call(call_id)
+                if db_c:
+                    customer_phone = customer_phone or db_c.get("customer_phone")
+                    customer_name = customer_name or db_c.get("customer_name")
+                    business_name = business_name or db_c.get("business_name")
+                    user_id = user_id or db_c.get("user_id")
+            except Exception:
+                pass
+
         outcome = str(analysis.get("call_outcome") or "").lower()
         summary = str(analysis.get("summary") or "").lower()
         action_items = " ".join(str(a) for a in analysis.get("action_items", [])).lower()
@@ -212,6 +230,7 @@ async def _maybe_auto_book_calendar(
             "meeting", "booked", "demo", "scheduled", "appointment", "calendar", "call back", "sync"
         ])
 
+        meeting_booked = None
         if is_meeting_intent or len(transcript) >= 2:
             from app.services import calendar_service
             transcript_text = "\n".join([
@@ -219,7 +238,7 @@ async def _maybe_auto_book_calendar(
                 for t in transcript
             ]) if isinstance(transcript, list) else str(transcript)
 
-            await calendar_service.auto_book_meeting_from_call(
+            meeting_booked = await calendar_service.auto_book_meeting_from_call(
                 call_id=call_id,
                 transcript=transcript_text,
                 customer_name=customer_name,
@@ -227,8 +246,32 @@ async def _maybe_auto_book_calendar(
                 business_name=business_name,
                 user_id=user_id,
             )
+
+        # If NO meeting was booked, but we had a conversation and have a customer phone, send Requirements Recap!
+        if not meeting_booked and customer_phone:
+            from app.services import whatsapp_service
+            req_items = []
+            if analysis.get("key_points_discussed"):
+                req_items.extend(analysis["key_points_discussed"])
+            elif analysis.get("summary"):
+                req_items.append(analysis["summary"])
+
+            if analysis.get("customer_concerns"):
+                req_items.extend([f"Note: {c}" for c in analysis["customer_concerns"]])
+
+            next_steps = analysis.get("action_items")
+
+            await whatsapp_service.send_requirements_summary(
+                customer_name=customer_name or "there",
+                customer_phone=customer_phone,
+                business_name=business_name or "Vyepari X",
+                requirements=req_items if req_items else (analysis.get("summary") or "Discussion on business requirements"),
+                next_steps=next_steps,
+            )
+            logger.info(f"Dispatched automated WhatsApp requirements recap to {customer_phone} for call {call_id}")
+
     except Exception as e:
-        logger.warning(f"Failed to auto-book calendar event for call {call_id}: {e}")
+        logger.warning(f"Failed in post-call calendar/whatsapp automation for call {call_id}: {e}")
 
 
 # ─────────────────────────── Live Sarvam AI + Exotel Outbound Call ─────

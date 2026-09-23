@@ -243,3 +243,38 @@ async def extract_and_book_from_call(call_id: str):
         return {"message": "No scheduled meeting or follow-up agreement detected in this transcript", "event": None}
 
     return {"message": "Meeting successfully extracted and booked", "event": event}
+
+
+@router.post("/events/{event_id}/send-whatsapp")
+async def send_whatsapp_for_event(event_id: str, phone: Optional[str] = Query(None)):
+    """
+    Manually dispatch or re-send WhatsApp meeting confirmation with Google Meet link.
+    """
+    event = await db.get_calendar_event(event_id)
+    if not event:
+        raise HTTPException(status_code=404, detail="Calendar event not found")
+
+    target_phone = phone or event.get("customer_phone")
+    if not target_phone:
+        raise HTTPException(status_code=400, detail="No customer phone number found for this event. Specify ?phone= in query or update event.")
+
+    from app.services import whatsapp_service
+    res = await whatsapp_service.send_meeting_confirmation(
+        customer_name=event.get("customer_name") or "there",
+        customer_phone=target_phone,
+        business_name=event.get("company_name") or "Vyepari X",
+        start_time=event.get("start_time") or "",
+        meet_url=event.get("meet_url") or "",
+        agenda=event.get("agenda") or event.get("description") or "",
+        requirements=event.get("notes") or "",
+    )
+
+    if not res.get("success"):
+        return {"success": False, "error": res.get("error"), "event_id": event_id}
+
+    await db.update_calendar_event(event_id, {
+        "whatsapp_status": "sent",
+        "whatsapp_sent_at": datetime.now(timezone.utc).isoformat(),
+        "customer_phone": target_phone,
+    })
+    return {"success": True, "message": "WhatsApp confirmation dispatched successfully", "result": res}

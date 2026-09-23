@@ -48,17 +48,32 @@ def get_sarvam_tts_api_key() -> str:
     return (os.getenv("SARVAM_TTS_API_KEY") or os.getenv("SARVAM_API_KEY", "")).strip()
 
 
+# Persistent reusable HTTP client for sub-300ms latency on live calls
+_HTTPX_CLIENT: Optional[httpx.AsyncClient] = None
+
+def get_httpx_client() -> httpx.AsyncClient:
+    global _HTTPX_CLIENT
+    if _HTTPX_CLIENT is None or _HTTPX_CLIENT.is_closed:
+        _HTTPX_CLIENT = httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=4.0, read=12.0, write=6.0, pool=10.0),
+            limits=httpx.Limits(max_keepalive_connections=15, max_connections=30),
+        )
+    return _HTTPX_CLIENT
+
+
 def resolve_language_code(language_input: Optional[str] = "hi") -> str:
     """
-    Resolve shorthand language names/codes to Sarvam BCP-47 language codes.
-    Default to Hindi if ambiguous or auto.
+    Resolve shorthand or regional language names to Sarvam BCP-47 language codes.
+    Maps 20+ Indian languages into Bulbul:v3 native phonetics:
+    - Hindi, Gujarati, Marathi, Bengali, Tamil, Telugu, Kannada, Malayalam, Punjabi, Odia, English.
+    - Regional languages (Urdu, Assamese, Bhojpuri, Maithili, Konkani, etc.) map to phonetic parent models.
     """
     lang = (language_input or "hi").strip().lower()
     if lang in ("gu", "gujarati", "gu-in"):
         return "gu-IN"
     elif lang in ("hi", "hindi", "hi-in"):
         return "hi-IN"
-    elif lang in ("en", "english", "en-in"):
+    elif lang in ("en", "english", "en-in", "hinglish"):
         return "en-IN"
     elif lang in ("mr", "marathi", "mr-in"):
         return "mr-IN"
@@ -66,9 +81,91 @@ def resolve_language_code(language_input: Optional[str] = "hi") -> str:
         return "ta-IN"
     elif lang in ("te", "telugu", "te-in"):
         return "te-IN"
-    elif lang in ("bn", "bengali", "bn-in"):
+    elif lang in ("bn", "bengali", "bn-in", "as", "assamese", "as-in"):
         return "bn-IN"
+    elif lang in ("kn", "kannada", "kn-in"):
+        return "kn-IN"
+    elif lang in ("ml", "malayalam", "ml-in"):
+        return "ml-IN"
+    elif lang in ("pa", "punjabi", "pa-in"):
+        return "pa-IN"
+    elif lang in ("or", "odia", "oriya", "or-in", "od-in"):
+        return "or-IN"
+    elif lang in ("ur", "urdu", "ur-in", "bho", "bhojpuri", "mai", "maithili", "sa", "sanskrit", "raj", "rajasthani"):
+        return "hi-IN"
+    elif lang in ("kok", "konkani", "kok-in"):
+        return "mr-IN"
     return "hi-IN"
+
+
+def detect_indic_language(text: str, default: str = "hi-IN") -> str:
+    """
+    Automatically detects Indic language BCP-47 code from Unicode script ranges in text:
+    - Gujarati (U+0A80 to U+0AFF) -> gu-IN
+    - Devanagari (U+0900 to U+097F) -> hi-IN or mr-IN (checks Marathi markers)
+    - Bengali/Assamese (U+0980 to U+09FF) -> bn-IN
+    - Gurmukhi/Punjabi (U+0A00 to U+0A7F) -> pa-IN
+    - Odia (U+0B00 to U+0B7F) -> or-IN
+    - Tamil (U+0B80 to U+0BFF) -> ta-IN
+    - Telugu (U+0C00 to U+0C7F) -> te-IN
+    - Kannada (U+0C80 to U+0CFF) -> kn-IN
+    - Malayalam (U+0D00 to U+0D7F) -> ml-IN
+    - Perso-Arabic / Urdu (U+0600 to U+06FF) -> hi-IN
+    - Latin / English / Hinglish -> en-IN
+    """
+    if not text:
+        return default
+
+    # Count script occurrences
+    counts = {
+        "gu-IN": 0,
+        "devanagari": 0,
+        "bn-IN": 0,
+        "pa-IN": 0,
+        "or-IN": 0,
+        "ta-IN": 0,
+        "te-IN": 0,
+        "kn-IN": 0,
+        "ml-IN": 0,
+        "en-IN": 0,
+    }
+
+    for char in text:
+        cp = ord(char)
+        if 0x0A80 <= cp <= 0x0AFF:
+            counts["gu-IN"] += 1
+        elif 0x0900 <= cp <= 0x097F:
+            counts["devanagari"] += 1
+        elif 0x0980 <= cp <= 0x09FF:
+            counts["bn-IN"] += 1
+        elif 0x0A00 <= cp <= 0x0A7F:
+            counts["pa-IN"] += 1
+        elif 0x0B00 <= cp <= 0x0B7F:
+            counts["or-IN"] += 1
+        elif 0x0B80 <= cp <= 0x0BFF:
+            counts["ta-IN"] += 1
+        elif 0x0C00 <= cp <= 0x0C7F:
+            counts["te-IN"] += 1
+        elif 0x0C80 <= cp <= 0x0CFF:
+            counts["kn-IN"] += 1
+        elif 0x0D00 <= cp <= 0x0D7F:
+            counts["ml-IN"] += 1
+        elif (0x0041 <= cp <= 0x005A) or (0x0061 <= cp <= 0x007A):
+            counts["en-IN"] += 1
+
+    # Check for dominant Indic script
+    best_script = max(counts, key=counts.get)
+    if counts[best_script] == 0:
+        return default
+
+    if best_script == "devanagari":
+        # Distinguish Marathi vs Hindi (check common Marathi words/suffixes)
+        marathi_markers = ["आहे", "आहोत", "नाही", "कसा", "कशी", "करा", "होते", "झाले", "नमस्कार"]
+        if any(marker in text for marker in marathi_markers):
+            return "mr-IN"
+        return "hi-IN"
+
+    return best_script
 
 
 def resolve_speaker(speaker_input: Optional[str] = "priya") -> str:
@@ -102,17 +199,22 @@ async def synthesize_speech(
     if not key:
         return {
             "success": False,
-            "error": "Sarvam API key is not configured. Set SARVAM_API_KEY in backend settings.",
+            "error": "Sarvam API key is not configured. Set SARVAM_API_KEY in backend settings or .env",
         }
 
     clean_text = text.strip()
     if not clean_text:
         return {"success": False, "error": "Text cannot be empty."}
 
-    lang_code = resolve_language_code(language)
+    # Auto-detect language script if language is ambiguous or auto
+    if not language or language.lower() in ("auto", "indic", "indic-auto"):
+        lang_code = detect_indic_language(clean_text)
+    else:
+        lang_code = resolve_language_code(language)
+
     spk = resolve_speaker(speaker)
 
-    # Check cache
+    # Check in-memory fast cache (instant response for common phrases)
     cache_key = f"{lang_code}:{spk}:{pace}:{clean_text}"
     if cache_key in _AUDIO_CACHE:
         cached = _AUDIO_CACHE[cache_key]
@@ -140,32 +242,32 @@ async def synthesize_speech(
     }
 
     try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            resp = await client.post(SARVAM_TTS_URL, headers=headers, json=payload)
-            if resp.status_code == 200:
-                data = resp.json()
-                audios = data.get("audios", [])
-                if audios:
-                    audio_b64 = audios[0]
-                    # Cache the result (limit cache to 200 entries to prevent memory leak)
-                    if len(_AUDIO_CACHE) > 200:
-                        _AUDIO_CACHE.pop(next(iter(_AUDIO_CACHE)))
-                    _AUDIO_CACHE[cache_key] = {
-                        "audio_b64": audio_b64,
-                    }
-                    return {
-                        "success": True,
-                        "audio_b64": audio_b64,
-                        "mime_type": "audio/wav",
-                        "language_code": lang_code,
-                        "speaker": spk,
-                    }
-                else:
-                    return {"success": False, "error": "Sarvam returned empty audio list."}
+        client = get_httpx_client()
+        resp = await client.post(SARVAM_TTS_URL, headers=headers, json=payload)
+        if resp.status_code == 200:
+            data = resp.json()
+            audios = data.get("audios", [])
+            if audios:
+                audio_b64 = audios[0]
+                # Cache the result (limit cache to 250 entries to prevent memory leak)
+                if len(_AUDIO_CACHE) > 250:
+                    _AUDIO_CACHE.pop(next(iter(_AUDIO_CACHE)))
+                _AUDIO_CACHE[cache_key] = {
+                    "audio_b64": audio_b64,
+                }
+                return {
+                    "success": True,
+                    "audio_b64": audio_b64,
+                    "mime_type": "audio/wav",
+                    "language_code": lang_code,
+                    "speaker": spk,
+                }
             else:
-                err_msg = resp.text
-                logger.error(f"Sarvam TTS failed ({resp.status_code}): {err_msg}")
-                return {"success": False, "error": f"Sarvam error ({resp.status_code}): {err_msg}"}
+                return {"success": False, "error": "Sarvam returned empty audio list."}
+        else:
+            err_msg = resp.text
+            logger.error(f"Sarvam TTS failed ({resp.status_code}): {err_msg}")
+            return {"success": False, "error": f"Sarvam error ({resp.status_code}): {err_msg}"}
     except Exception as e:
         logger.exception(f"Exception during Sarvam TTS request: {e}")
         return {"success": False, "error": str(e)}
