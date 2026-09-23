@@ -652,22 +652,8 @@ CRITICAL INSTRUCTIONS:
 Return ONLY valid JSON matching the schema.
 """
 
-    # If the dossier is large (> 16,000 chars / ~4,000 tokens), Groq on-demand will exceed
-    # its 7,000-8,000 TPM limit (Error 413).
-    # Gemini has a 1,000,000 token context window, so try Gemini first with the FULL dossier!
-    if len(primary_content) > 16000 and os.environ.get("GEMINI_API_KEY"):
-        logger.info(f"Dossier is large ({len(primary_content)} chars). Utilizing Gemini with 1M context window...")
-        gemini_result = _synthesize_with_gemini(
-            user_prompt=full_user_prompt,
-            individual_doc_insights=individual_doc_insights,
-            data_engine_figures=data_engine_figures,
-        )
-        if gemini_result:
-            return gemini_result
-        logger.warning("Gemini primary large-dossier synthesis did not succeed; falling back to truncated Groq synthesis.")
-
-    # Prepare safe truncated prompt for Groq to guarantee no 413 rate limit error
-    groq_content = _truncate_text_for_groq(primary_content, max_chars=14000)
+    # Prioritize Groq's high-speed Llama 3.3 engine directly for web scraping & dossier synthesis
+    groq_content = _truncate_text_for_groq(primary_content, max_chars=24000)
     groq_user_prompt = f"""DOSSIER WITH {doc_count} ATTACHED DOCUMENTS & WEB ASSETS:
 ================================================================================
 {content_note}

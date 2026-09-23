@@ -46,31 +46,16 @@ export function CinematicFrameHero() {
     setVideoReady(true);
   };
 
-  // Preloader status & progress ticker
+  // Fast preloader exit: dismiss immediately when frame/video is ready (max 350ms instead of 3.5s)
   useEffect(() => {
-    const statusTimer = setInterval(() => {
-      setStatusIndex((prev) => (prev < LOADING_STATUSES.length - 1 ? prev + 1 : prev));
-      setProgress((prev) => (prev < 90 ? prev + 18 : prev));
-    }, 450);
-
-    return () => clearInterval(statusTimer);
-  }, []);
-
-  // Graceful preloader exit once video is ready and initial phases complete
-  useEffect(() => {
-    if (videoReady && statusIndex >= 2) {
+    const timer = setTimeout(() => {
       setProgress(100);
-      const exitTimer = setTimeout(() => {
-        setIsExiting(true);
-        setTimeout(() => {
-          setIsLoading(false);
-        }, 750);
-      }, 500);
+      setIsExiting(true);
+      setTimeout(() => setIsLoading(false), 250);
+    }, 350);
 
-      return () => clearTimeout(exitTimer);
-    }
-    return undefined;
-  }, [videoReady, statusIndex]);
+    return () => clearTimeout(timer);
+  }, [videoReady]);
 
   // Frame-accurate hardware video synchronization
   useEffect(() => {
@@ -78,19 +63,17 @@ export function CinematicFrameHero() {
     const darkVideo = darkVideoRef.current;
     if (!lightVideo || !darkVideo) return;
 
-    // Ensure both videos start playing seamlessly
-    const playBoth = async () => {
-      try {
-        await Promise.all([
-          lightVideo.play().catch(() => {}),
-          darkVideo.play().catch(() => {}),
-        ]);
-      } catch {
-        // Autoplay policy fallback
-      }
-    };
+    // Start playing active video immediately
+    const activeVideo = currentTheme === "light" ? lightVideo : darkVideo;
+    activeVideo.play().catch(() => {});
 
-    playBoth();
+    // Idle background warm-up of the alternate theme video after initial paint
+    const idleTimer = setTimeout(() => {
+      const inactiveVideo = currentTheme === "light" ? darkVideo : lightVideo;
+      if (inactiveVideo && inactiveVideo.preload === "none") {
+        inactiveVideo.preload = "auto";
+      }
+    }, 1800);
 
     // Strict time alignment so transitions occur at the exact same millisecond
     const syncVideos = () => {
@@ -106,6 +89,7 @@ export function CinematicFrameHero() {
     const syncInterval = setInterval(syncVideos, 300);
 
     return () => {
+      clearTimeout(idleTimer);
       clearInterval(syncInterval);
     };
   }, [currentTheme]);
@@ -118,12 +102,16 @@ export function CinematicFrameHero() {
 
     const light = lightVideoRef.current;
     const dark = darkVideoRef.current;
-    if (light && dark) {
-      if (newTarget === "dark") {
-        dark.currentTime = light.currentTime;
-      } else {
-        light.currentTime = dark.currentTime;
+    const targetVideo = newTarget === "dark" ? dark : light;
+    const currentVideo = newTarget === "dark" ? light : dark;
+
+    if (targetVideo && currentVideo) {
+      if (targetVideo.preload === "none") {
+        targetVideo.preload = "auto";
+        targetVideo.load();
       }
+      targetVideo.currentTime = currentVideo.currentTime;
+      targetVideo.play().catch(() => {});
     }
   };
 
@@ -215,11 +203,12 @@ export function CinematicFrameHero() {
       <video
         ref={lightVideoRef}
         src="/videos/hero_light_2k.mp4"
+        poster="/videos/hero_light_poster.webp"
         playsInline
         muted
         loop
         autoPlay
-        preload="auto"
+        preload={currentTheme === "light" ? "auto" : "none"}
         onLoadedData={handleVideoLoaded}
         onCanPlay={handleVideoLoaded}
         className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-700 ease-in-out pointer-events-none will-change-transform ${
@@ -231,11 +220,12 @@ export function CinematicFrameHero() {
       <video
         ref={darkVideoRef}
         src="/videos/hero_dark_2k.mp4"
+        poster="/videos/hero_dark_poster.webp"
         playsInline
         muted
         loop
         autoPlay
-        preload="auto"
+        preload={currentTheme === "dark" ? "auto" : "none"}
         onLoadedData={handleVideoLoaded}
         onCanPlay={handleVideoLoaded}
         className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-700 ease-in-out pointer-events-none will-change-transform ${
