@@ -4,6 +4,7 @@ main.py — FastAPI application entry point.
 Endpoints:
   POST /api/reports          — Multipart submit with files, URLs, business context
   GET  /api/reports/{id}     — Poll status + get structured multi-source analysis
+  POST /api/reports/{id}/chat — Ask questions grounded in that report's submitted sources
   GET  /api/reports          — List recent reports
   GET  /health               — Health check
 """
@@ -37,12 +38,13 @@ from app.services import normalizer
 from app.services import scraper
 from app.services import data_engine
 from app.services import rag_engine
+from app.services import chat_service
 from app.routers import voice_router
 from app.routers import video_router
 from app.routers import calendar_router
 from app.routers import profile_router
 from app.services.search.router import get_search_router
-from config.domain_trust import classify_and_filter
+from config.domain_trust import SeedUrl, classify_and_filter
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -69,7 +71,7 @@ app = FastAPI(
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[FRONTEND_URL, "http://localhost:3000", "http://localhost:3001", "http://localhost:8080", "http://localhost:8081", "*"],
+    allow_origins=[FRONTEND_URL, "http://localhost:3000", "http://localhost:3001", "http://localhost:8080", "http://localhost:8081", "http://127.0.0.1:8080", "http://127.0.0.1:8081", "*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -274,6 +276,20 @@ class ReportRequest(BaseModel):
         return v.strip()
 
 
+class ReportChatRequest(BaseModel):
+    question: str
+
+    @field_validator("question")
+    @classmethod
+    def validate_question(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Question cannot be empty")
+        if len(value) > 2000:
+            raise ValueError("Question must be 2000 characters or fewer")
+        return value
+
+
 # ─────────────────────────── Pipeline Worker ────────────────────────────
 
 async def run_pipeline(
@@ -291,7 +307,7 @@ async def run_pipeline(
        - Crawl website (first-party pages, tier=first_party, confidence=1.0)
        - Search via SearchRouter (DDG → Serper fallback) for enrichment URLs
     3. Classify search results via domain_trust; fetch seed pages (Stage B)
-    3.5. RAG Ingest: chunk + embed all content → ChromaDB (per report_id)
+    3.5. RAG Ingest: chunk + embed submitted sources → Pinecone (per report_id)
     4. Run dedicated individual deep-dive on EVERY document (guaranteeing 100% extraction)
     5. RAG Retrieve: top-8 relevant chunks for synthesis query
     6. Run global commercial synthesis (Groq sees only retrieved chunks)
@@ -319,7 +335,7 @@ async def run_pipeline(
             domain = urlparse(website_url).netloc
             # Derive a search hint from domain so Stage A search can run
             # concurrently with the crawl (we don't have company_name yet).
-            domain_hint = domain.split(".")[0] if domain else ""
+            domain_hint = domain.removeprefix("www.").split(".")[0] if domain else ""
             search_query = f"{domain_hint} {domain}" if domain_hint else domain
 
             logger.info(
@@ -328,12 +344,28 @@ async def run_pipeline(
             )
             stage_a_start = time.monotonic()
 
-            # Genuinely parallel — both coroutines run concurrently
-            pages, search_results = await asyncio.gather(
+            # Genuinely parallel — both coroutines run concurrently with exception tolerance
+            results = await asyncio.gather(
                 scraper.crawl_website(website_url),
                 get_search_router().search(search_query, max_results=10),
-                return_exceptions=False,
+                return_exceptions=True,
             )
+            crawl_res, search_res = results
+
+            if isinstance(crawl_res, Exception):
+                logger.error(
+                    f"[{report_id}] crawl_website encountered an unexpected error: {crawl_res}",
+                    exc_info=crawl_res,
+                )
+                pages = []
+            else:
+                pages = crawl_res or []
+
+            if isinstance(search_res, Exception):
+                logger.warning(f"[{report_id}] search router encountered an error: {search_res}")
+                search_results = []
+            else:
+                search_results = search_res or []
 
             stage_a_duration = time.monotonic() - stage_a_start
             logger.info(
@@ -342,7 +374,7 @@ async def run_pipeline(
                 report_id,
             )
 
-            if not pages and not business_description and not processed_docs:
+            if not pages and not business_description and not processed_docs and not other_links:
                 await db.update_status(
                     report_id, "failed",
                     "No content could be extracted from the website and no documents/notes provided."
@@ -377,6 +409,24 @@ async def run_pipeline(
                     f"[{report_id}] Stage B complete: {len(seeded_pages)} seed pages fetched"
                 )
 
+        # Fetch user-submitted additional URLs directly so chat can retrieve
+        # their content too. Search-discovered pages remain separate sources.
+        if other_links:
+            existing_urls = {p.get("url", "") for p in [*pages, *seeded_pages]}
+            submitted_seeds = [
+                SeedUrl(url=url, tier="user_submitted", confidence=1.0, source="user")
+                for url in other_links
+                if (urlparse(url).hostname or "").lower() != "linkedin.com"
+                and not (urlparse(url).hostname or "").lower().endswith(".linkedin.com")
+            ]
+            if submitted_seeds:
+                submitted_pages = await scraper.fetch_seed_pages(
+                    submitted_seeds,
+                    existing_urls=existing_urls,
+                    max_seed_pages=10,
+                )
+                seeded_pages.extend(submitted_pages)
+
         # ── Phase 3: Normalization (single pass — no double build_profile) ─
         full_profile = normalizer.build_profile(
             source_url=website_url,
@@ -391,21 +441,26 @@ async def run_pipeline(
 
         await db.update_raw_profile(report_id, full_profile)
 
-        # ── Phase 2.5: RAG Ingest — chunk + embed all content into ChromaDB ──
-        logger.info(f"[{report_id}] RAG: Ingesting scraped pages and documents into vector store...")
+        # ── Phase 2.5: RAG Ingest — chunk and embed report content into Pinecone ──
+        # Store full extracted chunks before normalized pages are truncated.
+        report_chunks = rag_engine.build_report_chunks(
+            report_id,
+            [*pages, *seeded_pages],
+            processed_docs,
+            business_description,
+            [url for url in [website_url, *other_links] if url],
+        )
+        await db.replace_report_chunks(report_id, report_chunks)
+        logger.info(f"[{report_id}] RAG: Ingesting {len(report_chunks)} report chunks into Pinecone...")
         rag_web_chunks = 0
         rag_doc_chunks = 0
         rag_ingest_ok = False
         try:
-            if pages:
-                rag_web_chunks = await rag_engine.ingest_scraped_pages(report_id, pages)
-            # Also ingest seeded pages (DDG-discovered) into RAG
-            if seeded_pages:
-                seed_chunks = await rag_engine.ingest_scraped_pages(report_id, seeded_pages)
-                rag_web_chunks += seed_chunks
-            if processed_docs:
-                rag_doc_chunks = await rag_engine.ingest_processed_docs(report_id, processed_docs)
-            rag_ingest_ok = (rag_web_chunks + rag_doc_chunks) > 0
+            ingested = await rag_engine.ingest_report_chunks(report_id, report_chunks)
+            rag_ingest_ok = ingested > 0
+            if rag_ingest_ok:
+                rag_web_chunks = sum(chunk["source_type"] == "website" for chunk in report_chunks)
+                rag_doc_chunks = ingested - rag_web_chunks
             logger.info(
                 f"[{report_id}] RAG: Ingested {rag_web_chunks} web chunks + {rag_doc_chunks} doc chunks "
                 f"({rag_web_chunks + rag_doc_chunks} total)"
@@ -416,12 +471,12 @@ async def run_pipeline(
                 "Continuing with direct full-profile synthesis via Groq Llama 3."
             )
             rag_ingest_ok = False
-        except rag_engine.RAGIngestError as ingest_err:
-            # Non-quota ChromaDB failure — log at ERROR, partial ingest may have succeeded.
+        except (rag_engine.RAGIngestError, RuntimeError) as ingest_err:
+            # Non-quota Pinecone failure — the stored chunks remain available.
             logger.error(
                 f"[{report_id}] RAG ingest error (partial ingest, retrieval may be incomplete): {ingest_err}"
             )
-            rag_ingest_ok = (rag_web_chunks + rag_doc_chunks) > 0
+            rag_ingest_ok = False
 
         # ── Phase 4: Tier 1 Individual Document Deep-Dives ────────────
         await db.update_status(report_id, "analyzing")
@@ -435,16 +490,6 @@ async def run_pipeline(
             if content and not doc.get("error"):
                 insight = groq_client.analyze_single_document(fname, ftype, content)
                 individual_insights.append(insight)
-
-        # If website scraped, also add a website deep-dive entry
-        if pages:
-            web_summary_text = "\n\n".join([f"Page: {p.get('title')}\n{p.get('text')[:1000]}" for p in pages[:4]])
-            web_insight = groq_client.analyze_single_document(
-                doc_name=website_url or "Public Website",
-                doc_type="website",
-                content_text=web_summary_text,
-            )
-            individual_insights.append(web_insight)
 
         # ── Phase 4.5: Deterministic Numerical Extraction & Diagram Generation ──
         data_engine_figures = None
@@ -562,6 +607,19 @@ async def create_report(
         except Exception:
             clean_other_links = [x.strip() for x in other_links.split(",") if x.strip()]
 
+    if len(clean_other_links) > 10:
+        raise HTTPException(status_code=422, detail="A maximum of 10 additional source URLs is allowed.")
+    validated_other_links: list[str] = []
+    for raw_link in clean_other_links:
+        link = raw_link if raw_link.startswith(("http://", "https://")) else f"https://{raw_link}"
+        parsed_link = urlparse(link)
+        if parsed_link.scheme not in ("http", "https") or not parsed_link.netloc:
+            raise HTTPException(status_code=422, detail=f"Invalid additional source URL: {raw_link}")
+        if not scraper.is_safe_url(link):
+            raise HTTPException(status_code=422, detail="An additional source URL targets a private/internal address.")
+        validated_other_links.append(link)
+    clean_other_links = validated_other_links
+
     validated_website = None
     if website_url and website_url.strip():
         w = website_url.strip()
@@ -625,6 +683,35 @@ async def get_report(report_id: str):
     if report is None:
         raise HTTPException(status_code=404, detail="Report not found")
     return report
+
+
+@app.post("/api/reports/{report_id}/chat")
+async def chat_about_report(
+    report_id: str,
+    payload: ReportChatRequest,
+    authorization: Optional[str] = Header(None),
+):
+    auth_user = await auth_middleware.get_current_user(authorization)
+    if not auth_user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    report = await db.get_report(report_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail="Report not found")
+    owner_id = report.get("user_id")
+    if owner_id and str(owner_id) != str(auth_user.id):
+        raise HTTPException(status_code=404, detail="Report not found")
+    if report.get("status") != "done":
+        raise HTTPException(status_code=409, detail="Report is not ready for questions yet")
+
+    try:
+        return await chat_service.answer_report_question(report, payload.question)
+    except (rag_engine.RAGQuotaError, rag_engine.RAGRetrieveError) as exc:
+        logger.error("Report chat retrieval failed for %s: %s", report_id, exc)
+        raise HTTPException(status_code=503, detail="Could not retrieve this report's source data") from exc
+    except RuntimeError as exc:
+        logger.error("Report chat generation failed for %s: %s", report_id, exc)
+        raise HTTPException(status_code=503, detail="Chat service is temporarily unavailable") from exc
 
 
 @app.get("/api/reports")

@@ -184,6 +184,9 @@ def build_profile(
                 "url": p.get("url", ""),
                 "title": p.get("title", ""),
                 "text": _truncate_text(t, MAX_PAGE_CHARS),
+                "extraction_version": p.get("extraction_version"),
+                "categories": p.get("categories", []),
+                "crawl_coverage": p.get("crawl_coverage"),
                 "tier": p.get("tier", "first_party"),
                 "confidence": p.get("confidence", 1.0),
             })
@@ -194,6 +197,7 @@ def build_profile(
         "business_description": business_description or "",
         "documents": formatted_docs,
         "pages": clean_pages,
+        "crawl_coverage": [p["crawl_coverage"] for p in all_pages if p.get("crawl_coverage")],
         "linkedin_url": linkedin_url,
         "extra_links": extra_links or [],
         "scraped_at": datetime.now(timezone.utc).isoformat(),

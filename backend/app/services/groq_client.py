@@ -23,12 +23,12 @@ logger = logging.getLogger(__name__)
 
 FALLBACK_MODELS = [
     os.environ.get("GROQ_MODEL"),
-    "openai/gpt-oss-120b",
     "openai/gpt-oss-20b",
+    "openai/gpt-oss-120b",
     "qwen/qwen3.8-27b",
 ]
 PREFERRED_MODELS = [m for i, m in enumerate(FALLBACK_MODELS) if m and m not in FALLBACK_MODELS[:i]]
-GROQ_MODEL: str = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
+GROQ_MODEL: str = os.environ.get("GROQ_MODEL", "openai/gpt-oss-20b")
 
 
 def get_groq_api_key() -> str:
@@ -409,7 +409,7 @@ def analyze_single_document(doc_name: str, doc_type: str, content_text: str) -> 
 
     client = _get_client()
 
-    user_msg = f"DOCUMENT: {doc_name} (Format: {doc_type})\n\nCONTENT:\n{content_text[:12000]}"
+    user_msg = f"DOCUMENT: {doc_name} (Format: {doc_type})\n\nCONTENT:\n{content_text[:4000]}"
 
     for target_model in PREFERRED_MODELS:
         try:
@@ -420,7 +420,7 @@ def analyze_single_document(doc_name: str, doc_type: str, content_text: str) -> 
                     {"role": "user", "content": user_msg},
                 ],
                 temperature=0.1,
-                max_tokens=3000,
+                max_tokens=1200,
                 response_format={"type": "json_object"},
             )
             raw = _strip_json_fences(resp.choices[0].message.content or "")
@@ -521,15 +521,15 @@ Return raw JSON only.
 """
 
 
-def _truncate_text_for_groq(text: str, max_chars: int = 14000) -> str:
+def _truncate_text_for_groq(text: str, max_chars: int = 9000) -> str:
     """Safely truncates text so Groq does not exceed its 7000-8000 Token-Per-Minute rate limit."""
     if not text or len(text) <= max_chars:
         return text
-    # Keep the first 10,000 chars (intro, products, pricing) and the last 4,000 chars (conclusions/recent data)
+    # Keep the first 6,000 chars (intro, products, pricing) and the last 3,000 chars (conclusions/recent data)
     return (
-        f"{text[:10000]}\n\n"
-        f"--- [Dossier excerpted to fit Groq token rate limits — remaining {len(text) - 14000} characters omitted] ---\n\n"
-        f"{text[-4000:]}"
+        f"{text[:6000]}\n\n"
+        f"--- [Dossier excerpted to fit Groq token rate limits — remaining {len(text) - 9000} characters omitted] ---\n\n"
+        f"{text[-3000:]}"
     )
 
 
@@ -538,63 +538,71 @@ def _synthesize_with_gemini(
     individual_doc_insights: list[DocumentInsight] | None = None,
     data_engine_figures: dict | None = None,
 ) -> BusinessAnalysis | None:
-    gemini_key = (os.environ.get("GEMINI_API_KEY") or "").strip()
-    if not gemini_key:
+    keys_to_try = [
+        (os.environ.get("GEMINI_API_KEY") or "").strip(),
+        (os.environ.get("GEMINI_API_KEY_BACKUP") or "").strip(),
+    ]
+    keys_to_try = [k for k in keys_to_try if k]
+    if not keys_to_try:
         return None
+
+    configured_model = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+    models_to_try = [configured_model, "gemini-2.5-flash", "gemini-2.5-pro", "gemini-1.5-flash"]
+    seen = set()
+    models_to_try = [m for m in models_to_try if m and not (m in seen or seen.add(m))]
+
+    prompt_content = f"{GLOBAL_SYNTHESIS_PROMPT}\n\n{user_prompt}\n\nReturn ONLY valid JSON matching the schema."
+
     try:
         from google import genai
-        client = genai.Client(api_key=gemini_key)
-        configured_model = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
-        models_to_try = [configured_model, "gemini-2.5-flash"]
-        seen = set()
-        models_to_try = [m for m in models_to_try if m and not (m in seen or seen.add(m))]
 
-        prompt_content = f"{GLOBAL_SYNTHESIS_PROMPT}\n\n{user_prompt}\n\nReturn ONLY valid JSON matching the schema."
-
-        resp = None
-        for m in models_to_try:
+        for api_key in keys_to_try:
             try:
-                logger.info(f"Synthesizing business intelligence with Gemini ({m})...")
-                resp = client.models.generate_content(
-                    model=m,
-                    contents=prompt_content,
-                    config={"response_mime_type": "application/json"}
-                )
-                if resp and resp.text:
-                    logger.info(f"Gemini synthesis succeeded with model {m} ✓")
-                    break
-            except Exception as g_err:
-                logger.warning(f"Gemini synthesis with model {m} failed: {g_err}")
+                client = genai.Client(api_key=api_key)
+            except Exception:
                 continue
 
-        if not resp or not resp.text:
-            return None
+            for m in models_to_try:
+                try:
+                    logger.info(f"Synthesizing business intelligence with Gemini ({m})...")
+                    resp = client.models.generate_content(
+                        model=m,
+                        contents=prompt_content,
+                        config={"response_mime_type": "application/json"}
+                    )
+                    if resp and resp.text:
+                        raw = _strip_json_fences(resp.text)
+                        data = json.loads(raw)
 
-        raw = _strip_json_fences(resp.text)
-        data = json.loads(raw)
+                        if individual_doc_insights:
+                            data["document_insights"] = [d.model_dump() for d in individual_doc_insights]
 
-        if individual_doc_insights:
-            data["document_insights"] = [d.model_dump() for d in individual_doc_insights]
+                        if data_engine_figures:
+                            data["data_source_mode"] = data_engine_figures.get("data_source_mode", "website_inferred")
+                            data["data_source_summary"] = data_engine_figures.get("data_source_summary", "")
+                            data["growth_forecast"] = data_engine_figures.get("growth_forecast") or []
+                            data["conversion_funnel"] = data_engine_figures.get("conversion_funnel") or []
+                            if data_engine_figures.get("timeline_roadmap"):
+                                data["timeline_roadmap"] = data_engine_figures["timeline_roadmap"]
+                            if data_engine_figures.get("financial_highlights"):
+                                existing_fins = data.get("financial_highlights") or []
+                                file_fins = data_engine_figures["financial_highlights"]
+                                file_names = {f["metric_name"] for f in file_fins if isinstance(f, dict)}
+                                data["financial_highlights"] = file_fins + [
+                                    f for f in existing_fins if (isinstance(f, dict) and f.get("metric_name") not in file_names)
+                                ]
 
-        if data_engine_figures:
-            data["data_source_mode"] = data_engine_figures.get("data_source_mode", "website_inferred")
-            data["data_source_summary"] = data_engine_figures.get("data_source_summary", "")
-            data["growth_forecast"] = data_engine_figures.get("growth_forecast") or []
-            data["conversion_funnel"] = data_engine_figures.get("conversion_funnel") or []
-            if data_engine_figures.get("timeline_roadmap"):
-                data["timeline_roadmap"] = data_engine_figures["timeline_roadmap"]
-            if data_engine_figures.get("financial_highlights"):
-                existing_fins = data.get("financial_highlights") or []
-                file_fins = data_engine_figures["financial_highlights"]
-                file_names = {f["metric_name"] for f in file_fins if isinstance(f, dict)}
-                data["financial_highlights"] = file_fins + [
-                    f for f in existing_fins if (isinstance(f, dict) and f.get("metric_name") not in file_names)
-                ]
+                        logger.info(f"Gemini synthesis succeeded with model {m} ✓")
+                        return BusinessAnalysis.model_validate(data)
+                except Exception as g_err:
+                    logger.warning(f"Gemini synthesis with model {m} failed: {g_err}")
+                    continue
 
-        return BusinessAnalysis.model_validate(data)
+        return None
     except Exception as e:
         logger.warning(f"Gemini synthesis failed: {e}")
         return None
+
 
 
 def analyze_business(
@@ -667,7 +675,7 @@ Return ONLY valid JSON matching the schema.
         logger.warning("Gemini primary large-dossier synthesis did not succeed; falling back to truncated Groq synthesis.")
 
     # Prepare safe truncated prompt for Groq to guarantee no 413 rate limit error
-    groq_content = _truncate_text_for_groq(primary_content, max_chars=14000)
+    groq_content = _truncate_text_for_groq(primary_content, max_chars=9000)
     groq_user_prompt = f"""DOSSIER WITH {doc_count} ATTACHED DOCUMENTS & WEB ASSETS:
 ================================================================================
 {content_note}
@@ -703,7 +711,12 @@ Return ONLY valid JSON matching the schema.
 
     last_error = None
     for target_model in candidate_models:
-        safe_max_tokens = 1800 if "qwen" in target_model.lower() else 3500
+        if "120b" in target_model.lower():
+            safe_max_tokens = 3200
+        elif "qwen" in target_model.lower():
+            safe_max_tokens = 1800
+        else:
+            safe_max_tokens = 2500
 
         logger.info(f"Calling Groq Global Synthesis (model={target_model}, max_tokens={safe_max_tokens})...")
         try:
@@ -761,9 +774,14 @@ Return ONLY valid JSON matching the schema.
             return BusinessAnalysis.model_validate(data)
 
         except Exception as api_err:
-            err_str = str(api_err)
-            logger.warning(f"Model {target_model} error: {err_str}. Trying next candidate...")
+            err_str = str(api_err).lower()
             last_error = api_err
+            if "429" in err_str or "rate_limit" in err_str or "413" in err_str or "tokens" in err_str:
+                logger.warning(f"Model {target_model} hit token/rate limit ({api_err}). Waiting 4s before trying next candidate...")
+                import time
+                time.sleep(4.0)
+            else:
+                logger.warning(f"Model {target_model} error: {api_err}. Trying next candidate...")
             continue
 
     # Fallback to Gemini if Groq exhausted all candidate models
@@ -776,4 +794,25 @@ Return ONLY valid JSON matching the schema.
     if gemini_result:
         return gemini_result
 
+    # Final emergency attempt: ultra-compact prompt to ensure report generation never fails
+    try:
+        logger.info("Attempting emergency ultra-compact synthesis on Groq...")
+        compact_prompt = f"Target: {primary_content[:3500]}\nProvide high-level commercial synthesis JSON."
+        resp = client.chat.completions.create(
+            model="openai/gpt-oss-120b",
+            messages=[
+                {"role": "system", "content": GLOBAL_SYNTHESIS_PROMPT},
+                {"role": "user", "content": compact_prompt},
+            ],
+            temperature=0.2,
+            max_tokens=1800,
+            response_format={"type": "json_object"},
+        )
+        raw = _strip_json_fences(resp.choices[0].message.content or "")
+        data = json.loads(raw)
+        return BusinessAnalysis.model_validate(data)
+    except Exception as emergency_err:
+        logger.error(f"Emergency synthesis failed: {emergency_err}")
+
     raise RuntimeError(f"Both Groq and Gemini API failed to synthesize report. Groq error: {last_error}")
+

@@ -23,7 +23,15 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
+from pymongo import ReplaceOne
 from supabase import Client, create_client
+
+try:
+    import dns.resolver
+    dns.resolver.default_resolver = dns.resolver.Resolver(configure=False)
+    dns.resolver.default_resolver.nameservers = ['8.8.8.8', '1.1.1.1']
+except Exception:
+    pass
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -91,6 +99,34 @@ def get_mongo_db() -> AsyncIOMotorDatabase:
         _mongo_db = client[db_name]
     return _mongo_db
 
+
+async def get_chat_answer(key: str) -> Optional[dict]:
+    """Durable answers are required for repeatability across API workers."""
+    try:
+        row = await get_mongo_db()["chat_answers"].find_one({"_id": key})
+        return row.get("answer") if row else None
+    except Exception as exc:
+        raise RuntimeError("Chat answer cache is unavailable") from exc
+
+
+async def save_chat_answer(key: str, report_id: str, answer: dict) -> dict:
+    from pymongo import ReturnDocument
+    from pymongo.errors import DuplicateKeyError
+    collection = get_mongo_db()["chat_answers"]
+    try:
+        try:
+            row = await collection.find_one_and_update(
+                {"_id": key}, {"$setOnInsert": {"report_id": report_id, "answer": answer, "created_at": _now()}},
+                upsert=True, return_document=ReturnDocument.AFTER,
+            )
+        except DuplicateKeyError:
+            row = await collection.find_one({"_id": key})
+        if not row:
+            raise RuntimeError("Chat cache write returned no record")
+        return row["answer"]
+    except Exception as exc:
+        raise RuntimeError("Chat answer cache is unavailable") from exc
+
 def _clean_doc(doc: Optional[dict]) -> Optional[dict]:
     """Convert MongoDB _id to string or remove it so output is clean JSON."""
     if not doc:
@@ -119,6 +155,7 @@ def _ensure_uuid(val: Optional[str]) -> Optional[str]:
 
 # ─────────────────────────── In-Memory Fast Cache ────────────────────────
 _in_memory_reports: Dict[str, dict] = {}
+_in_memory_report_chunks: Dict[str, List[dict]] = {}
 _in_memory_calls: Dict[str, dict] = {}
 _in_memory_voice_campaigns: Dict[str, dict] = {}
 _in_memory_video_calls: Dict[str, dict] = {}
@@ -165,6 +202,9 @@ async def init_db():
             await _mongo_db["reports"].create_index("id", unique=True, background=True)
             await _mongo_db["reports"].create_index("user_id", background=True)
             await _mongo_db["reports"].create_index("created_at", background=True)
+            await _mongo_db["report_chunks"].create_index(
+                [("report_id", 1), ("chunk_id", 1)], unique=True, background=True
+            )
             await _mongo_db["voice_calls"].create_index("id", unique=True, background=True)
             await _mongo_db["voice_calls"].create_index("user_id", background=True)
             await _mongo_db["voice_calls"].create_index("created_at", background=True)
@@ -306,6 +346,45 @@ async def update_raw_profile(report_id: str, raw_profile: dict):
         await db["reports"].update_one({"id": report_id}, {"$set": updates})
     except Exception as e:
         logger.warning(f"MongoDB update_raw_profile error for {report_id}: {e}")
+
+
+async def replace_report_chunks(report_id: str, chunks: List[dict]) -> None:
+    """Persist full extracted chunks for report-scoped retrieval fallback."""
+    records = [{**chunk, "report_id": report_id} for chunk in chunks]
+    _in_memory_report_chunks[report_id] = records
+    try:
+        collection = get_mongo_db()["report_chunks"]
+        if records:
+            operations = [
+                ReplaceOne(
+                    {"report_id": report_id, "chunk_id": record["chunk_id"]},
+                    record,
+                    upsert=True,
+                )
+                for record in records
+            ]
+            await collection.bulk_write(operations, ordered=False)
+            await collection.delete_many({
+                "report_id": report_id,
+                "chunk_id": {"$nin": [record["chunk_id"] for record in records]},
+            })
+        else:
+            await collection.delete_many({"report_id": report_id})
+    except Exception as exc:
+        logger.warning("MongoDB report chunk write failed for %s: %s", report_id, exc)
+
+
+async def get_report_chunks(report_id: str) -> List[dict]:
+    """Get only one report's canonical chunks, with process-local fallback."""
+    try:
+        cursor = get_mongo_db()["report_chunks"].find({"report_id": report_id}, {"_id": 0})
+        records = await cursor.to_list(length=None)
+        if records:
+            _in_memory_report_chunks[report_id] = records
+            return records
+    except Exception as exc:
+        logger.warning("MongoDB report chunk read failed for %s: %s", report_id, exc)
+    return list(_in_memory_report_chunks.get(report_id, []))
 
 async def update_analysis(report_id: str, analysis: dict):
     """Store Groq intelligence analysis and mark report done in MongoDB and memory."""

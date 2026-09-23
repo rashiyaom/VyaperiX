@@ -42,6 +42,7 @@ import {
   Flame,
   FileCheck2,
   Sliders,
+  MessageCircle,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -65,6 +66,7 @@ import {
 } from "recharts";
 import { Logo } from "@/components/site/Chrome";
 import { FileUploadZone } from "@/components/scraper/FileUploadZone";
+import { ReportChat } from "@/components/scraper/ReportChat";
 import {
   DocumentInsightPanel,
   DiscrepancyAlerts,
@@ -97,7 +99,39 @@ export const Route = createFileRoute("/dashboard")({
   component: DashboardPage,
 });
 
-const API_BASE = (import.meta.env["VITE_SCRAPER_API_BASE"] as string) || "http://localhost:8000";
+const API_BASE = (import.meta.env["VITE_SCRAPER_API_BASE"] as string) || "http://127.0.0.1:8000";
+
+async function safeApiFetch(endpoint: string, init?: RequestInit): Promise<Response> {
+  const primary = endpoint.startsWith("http") ? endpoint : `${API_BASE}${endpoint.startsWith("/") ? "" : "/"}${endpoint}`;
+  console.log("[safeApiFetch] Trying:", primary);
+  try {
+    const res = await fetch(primary, init);
+    console.log("[safeApiFetch] Success from:", primary, res.status);
+    return res;
+  } catch (err: any) {
+    console.warn("[safeApiFetch] Failed for:", primary, err);
+    const isLocalhost = primary.includes("localhost:8000");
+    const is127 = primary.includes("127.0.0.1:8000");
+    if (isLocalhost || is127) {
+      const fallbackUrl = isLocalhost ? primary.replace("localhost:8000", "127.0.0.1:8000") : primary.replace("127.0.0.1:8000", "localhost:8000");
+      console.log("[safeApiFetch] Trying fallback:", fallbackUrl);
+      try {
+        const res = await fetch(fallbackUrl, init);
+        console.log("[safeApiFetch] Fallback success from:", fallbackUrl, res.status);
+        return res;
+      } catch (fallbackErr) {
+        console.error("[safeApiFetch] Fallback also failed:", fallbackErr);
+      }
+    }
+    if (primary.includes(":8001")) {
+      const fallback8000 = primary.replace(":8001", ":8000");
+      try {
+        return await fetch(fallback8000, init);
+      } catch {}
+    }
+    throw err;
+  }
+}
 
 /* ─── Types ─── */
 interface RecentReport {
@@ -309,7 +343,7 @@ function ScraperIntakeForm({ onReportCreated }: { onReportCreated: (id: string) 
         headers["Authorization"] = `Bearer ${session.access_token}`;
       }
 
-      const res = await fetch(`${API_BASE}/api/reports`, {
+      const res = await safeApiFetch("/api/reports", {
         method: "POST",
         headers,
         body: fd,
@@ -462,7 +496,7 @@ function ReportView({
   const [copied, setCopied] = useState(false);
   const [completedSteps, setCompletedSteps] = useState<Record<string, boolean>>({});
   const [activeBifurcation, setActiveBifurcation] = useState<
-    "overview" | "financial" | "pipeline" | "timeline" | "icp" | "audit" | "all"
+    "overview" | "financial" | "pipeline" | "timeline" | "icp" | "audit" | "chat" | "all"
   >("overview");
   const [userMonthlyRevenue, setUserMonthlyRevenue] = useState<string>("");
   const [userDealCycle, setUserDealCycle] = useState<string>("");
@@ -475,7 +509,7 @@ function ReportView({
     let notFoundRetries = 0;
     const fetch_ = async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/reports/${reportId}`);
+        const res = await safeApiFetch(`/api/reports/${reportId}`);
         if (res.ok && isSubscribed) {
           notFoundRetries = 0;
           const data: ReportData = await res.json();
@@ -914,6 +948,7 @@ function ReportView({
             { id: "timeline", label: "04. Execution Timeline", icon: Clock, badge: `${analysis.timeline_roadmap?.length || 4} Phases` },
             { id: "icp", label: "05. ICP & Market Matrix", icon: Users, badge: `${customers.length} ICPs` },
             { id: "audit", label: "06. Document Audit", icon: FileText, badge: `${analysis.document_insights?.length || 0} Docs` },
+            { id: "chat", label: "07. Ask This Report", icon: MessageCircle },
             { id: "all", label: "View All Sections", icon: FileCheck2 },
           ].map((tab) => {
             const isAct = activeBifurcation === tab.id;
@@ -1718,6 +1753,7 @@ function ReportView({
           ) : null}
         </div>
       )}
+      {activeBifurcation === "chat" && <ReportChat key={report.id} reportId={report.id} />}
     </div>
   );
 }
@@ -1791,7 +1827,7 @@ function DashboardPage() {
       if (session?.access_token) {
         headers["Authorization"] = `Bearer ${session.access_token}`;
       }
-      const res = await fetch(url, { headers });
+      const res = await safeApiFetch(url, { headers });
       if (res.ok) {
         const data = await res.json();
         setRecentReports(data);

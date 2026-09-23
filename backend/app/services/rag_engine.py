@@ -23,12 +23,13 @@ Design:
 """
 
 import asyncio
+import hashlib
 import logging
 import os
 import re
 import textwrap
 import time
-from pathlib import Path
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
@@ -38,10 +39,12 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────── Config ────────────────────────────────────────
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_API_KEY_BACKUP = os.environ.get("GEMINI_API_KEY_BACKUP", "")
 GEMINI_EMBED_MODEL = "models/gemini-embedding-001"
-CHROMA_PERSIST_DIR = os.environ.get("CHROMA_PERSIST_DIR", str(Path(__file__).resolve().parents[2] / "data" / "chroma_store"))
-CHUNK_SIZE = 800
-CHUNK_OVERLAP = 150
+PINECONE_API_KEY = os.environ.get("PINECONE_API_KEY", "")
+PINECONE_INDEX_NAME = os.environ.get("PINECONE_INDEX_NAME", "vyeparix-rag")
+CHUNK_SIZE = 500  # approximate word/punctuation tokens
+CHUNK_OVERLAP = 50
 DEFAULT_TOP_K = 8
 
 # ─────────────────────────── Custom Exceptions ─────────────────────────────
@@ -55,7 +58,7 @@ class RAGQuotaError(RuntimeError):
 
 
 class RAGIngestError(RuntimeError):
-    """Raised when ingestion fails for a non-quota reason (e.g., ChromaDB issue)."""
+    """Raised when ingestion fails for a non-quota reason."""
     pass
 
 
@@ -65,13 +68,21 @@ class RAGRetrieveError(RuntimeError):
 
 # ─────────────────────────── Lazy Client Factories ─────────────────────────
 
-def _get_gemini_client():
+_primary_embedding_key_paused_until = 0.0
+
+
+def _get_gemini_client(api_key: str | None = None):
     """Return a configured google.genai Client."""
     try:
         from google import genai
-        if not GEMINI_API_KEY:
-            raise RuntimeError("GEMINI_API_KEY not set in .env")
-        return genai.Client(api_key=GEMINI_API_KEY)
+        selected = api_key or GEMINI_API_KEY or GEMINI_API_KEY_BACKUP
+        if not selected:
+            raise RuntimeError("A Gemini embedding API key is not configured")
+        # The SDK's default transport retries can stall a chat request for
+        # minutes on quota errors. Bound each key attempt before failover.
+        return genai.Client(api_key=selected, http_options={
+            "timeout": 15000, "retry_options": {"attempts": 1},
+        })
     except ImportError:
         raise RuntimeError(
             "google-genai is not installed. Run: pip3 install 'google-genai>=0.3.0'"
@@ -94,38 +105,78 @@ def _get_pinecone_index():
 
 # ─────────────────────────── Chunking ──────────────────────────────────────
 
-def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> list:
-    """Split text into overlapping character-level chunks, preferring paragraph breaks."""
+_TOKEN_RE = re.compile(r"\w+|[^\w\s]", re.UNICODE)
+
+
+def _token_count(text: str) -> int:
+    """Local token estimate; exact Gemini tokenization is not needed for chunk bounds."""
+    return len(_TOKEN_RE.findall(text))
+
+
+def _split_on_tokens(text: str, limit: int) -> list[str]:
+    spans = list(_TOKEN_RE.finditer(text))
+    if len(spans) <= limit:
+        return [text.strip()]
+    return [
+        text[spans[start].start():spans[min(start + limit, len(spans)) - 1].end()].strip()
+        for start in range(0, len(spans), limit)
+    ]
+
+
+def _tail_tokens(text: str, count: int) -> str:
+    spans = list(_TOKEN_RE.finditer(text))
+    if not spans:
+        return ""
+    return text[spans[max(0, len(spans) - count)].start():].strip()
+
+
+def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> list[str]:
+    """Make roughly 300–500 token chunks, keeping paragraphs and sentences together."""
     if not text or not text.strip():
         return []
+    if chunk_size <= overlap or overlap < 0:
+        raise ValueError("chunk_size must exceed a nonnegative overlap")
 
     text = re.sub(r"\n{3,}", "\n\n", text.strip())
-    paragraphs = text.split("\n\n")
-    chunks = []
-    current = ""
-
-    for para in paragraphs:
-        para = para.strip()
-        if not para:
+    unit_limit = chunk_size - overlap
+    units: list[str] = []
+    for paragraph in re.split(r"\n\s*\n", text):
+        paragraph = paragraph.strip()
+        if not paragraph:
             continue
-        if len(current) + len(para) + 2 <= chunk_size:
-            current = (current + "\n\n" + para).strip() if current else para
-        else:
-            if current:
-                chunks.append(current)
-            if len(para) > chunk_size:
-                for i in range(0, len(para), chunk_size - overlap):
-                    sub = para[i : i + chunk_size]
-                    if sub.strip():
-                        chunks.append(sub.strip())
-                current = ""
-            else:
-                current = para
+        if _token_count(paragraph) <= unit_limit:
+            units.append(paragraph)
+            continue
+        # Split long paragraphs at sentence boundaries before splitting words.
+        sentences = re.split(r"(?<=[.!?])\s+|\n+", paragraph)
+        sentence_group = ""
+        for sentence in sentences:
+            sentence = sentence.strip()
+            if not sentence:
+                continue
+            for piece in _split_on_tokens(sentence, unit_limit):
+                candidate = f"{sentence_group} {piece}".strip() if sentence_group else piece
+                if sentence_group and _token_count(candidate) > unit_limit:
+                    units.append(sentence_group)
+                    sentence_group = piece
+                else:
+                    sentence_group = candidate
+        if sentence_group:
+            units.append(sentence_group)
 
+    chunks: list[str] = []
+    current = ""
+    for unit in units:
+        candidate = f"{current}\n\n{unit}".strip() if current else unit
+        if current and _token_count(candidate) > chunk_size:
+            chunks.append(current)
+            carry = _tail_tokens(current, overlap)
+            current = f"{carry}\n\n{unit}".strip() if carry else unit
+        else:
+            current = candidate
     if current:
         chunks.append(current)
-
-    return [c for c in chunks if len(c.strip()) >= 40]
+    return [chunk for chunk in chunks if chunk.strip()]
 
 
 # ─────────────────────────── Embedding ─────────────────────────────────────
@@ -139,45 +190,46 @@ def _embed_texts_sync(texts: list, task_type: str = "RETRIEVAL_DOCUMENT") -> lis
     Raises RAGQuotaError on quota/auth failures (caller must not silently degrade).
     Raises RuntimeError on other unexpected API failures.
     """
-    client = _get_gemini_client()
+    global _primary_embedding_key_paused_until
+    keys = [("primary", GEMINI_API_KEY), ("backup", GEMINI_API_KEY_BACKUP)]
+    keys = [(label, key) for label, key in keys if key and (label != "primary" or time.monotonic() >= _primary_embedding_key_paused_until)]
+    if not keys:
+        keys = [("backup", GEMINI_API_KEY_BACKUP)] if GEMINI_API_KEY_BACKUP else [("primary", GEMINI_API_KEY)]
+    if not keys[0][1]:
+        raise RAGQuotaError("No Gemini embedding API key is configured")
     vectors = []
 
     batch_size = 100  # Gemini batch limit
     for i in range(0, len(texts), batch_size):
         batch = texts[i : i + batch_size]
-        max_retries = 3
         result = None
-        for attempt in range(max_retries):
+        for label, key in keys:
             try:
+                client = _get_gemini_client(key)
                 result = client.models.embed_content(
                     model=GEMINI_EMBED_MODEL,
                     contents=batch,
                     config={"task_type": task_type},
                 )
+                if label == "backup":
+                    keys = [("backup", key)]
                 break
             except Exception as e:
                 err_str = str(e).lower()
-                is_rate_limit = any(kw in err_str for kw in ("429", "resource_exhausted", "rate limit"))
-                if is_rate_limit and attempt < max_retries - 1:
-                    wait_time = (attempt + 1) * 3
-                    logger.warning(
-                        f"[RAG] Gemini embedding rate limit hit (429). Retrying in {wait_time}s (attempt {attempt+1}/{max_retries})..."
-                    )
-                    time.sleep(wait_time)
-                    continue
-
-                # Detect quota / auth failures explicitly
-                if any(kw in err_str for kw in (
+                quota_or_auth = any(kw in err_str for kw in (
                     "quota", "rate limit", "resource_exhausted", "429",
                     "api_key", "permission", "unauthenticated", "403", "401",
-                )):
-                    raise RAGQuotaError(
-                        f"[RAG] Gemini embedding quota/auth failure — analysis STOPPED. "
-                        f"Do not fall back to raw-text synthesis. Error: {e}"
-                    ) from e
+                ))
+                if quota_or_auth:
+                    logger.warning("Gemini embedding %s key unavailable (%s); checking next configured key", label, type(e).__name__)
+                    if label == "primary" and GEMINI_API_KEY_BACKUP:
+                        _primary_embedding_key_paused_until = time.monotonic() + 900
+                    continue
                 raise RuntimeError(
-                    f"[RAG] Gemini embedding unexpected error: {e}"
+                    f"[RAG] Gemini embedding unexpected {type(e).__name__}"
                 ) from e
+        if result is None:
+            raise RAGQuotaError("All configured Gemini embedding keys are unavailable")
 
         if result and hasattr(result, "embeddings"):
             for emb in result.embeddings:
@@ -196,6 +248,112 @@ def _collection_name(report_id: str) -> str:
     """Pinecone namespace: alphanumeric + hyphens."""
     safe = re.sub(r"[^a-zA-Z0-9\-]", "-", report_id)
     return f"rep-{safe}"[:63]
+
+
+def _chat_collection_name(report_id: str) -> str:
+    """No legacy vectors in chat; hashing avoids truncation collisions."""
+    return f"rep-{hashlib.sha256(report_id.encode()).hexdigest()[:40]}-v3"
+
+
+def build_report_chunks(
+    report_id: str,
+    pages: list[dict],
+    documents: list[dict],
+    business_description: str | None,
+    submitted_urls: list[str],
+) -> list[dict]:
+    """Build canonical report chunks before normalized pages are truncated."""
+    submitted_hosts = {
+        (urlparse(url if "://" in url else f"https://{url}").hostname or "").lower().removeprefix("www.")
+        for url in submitted_urls if url
+    }
+    from app.services.extraction_validator import EXTRACTION_VERSION, is_trusted, evidence_record
+    chunks: list[dict] = []
+
+    def add(source_key: str, source: str, source_type: str, text: str,
+            *, url: str = "", doc_type: str = "", chat_allowed: bool = True,
+            evidence: list[dict] | None = None, scope_url: str = "", categories: list | None = None) -> None:
+        for chunk_idx, content in enumerate(chunk_text(text)):
+            identity = f"{report_id}|{source_type}|{source_key}|{chunk_idx}|{content}"
+            chunks.append({
+                "report_id": report_id,
+                "chunk_id": hashlib.sha256(identity.encode("utf-8")).hexdigest()[:32],
+                "text": content,
+                "source": source,
+                "source_type": source_type,
+                "type": "website" if source_type == "website" else (doc_type or source_type),
+                "url": url,
+                "chunk_idx": chunk_idx,
+                "chat_allowed": chat_allowed,
+                "extraction_version": EXTRACTION_VERSION,
+                "evidence": evidence or [],
+                "scope_url": scope_url or url,
+                "categories": categories or [],
+            })
+
+    seen_urls: set[str] = set()
+    for page in pages:
+        url = str(page.get("url") or "").strip()
+        if not url or url in seen_urls:
+            continue
+        host = (urlparse(url).hostname or "").lower().removeprefix("www.")
+        title = str(page.get("title") or url).strip()[:160]
+        evidence = [r for r in page.get("evidence", []) if is_trusted(r) and r.get("url") == url]
+        text = "\n\n".join(r["text"] for r in evidence)
+        if not text.strip():
+            continue
+        seen_urls.add(url)
+        scope_url = str(page.get("scope_url") or page.get("requested_url") or url)
+        scope_host = (urlparse(scope_url).hostname or "").lower().removeprefix("www.")
+        add(url, f"{title} ({url})", "website", text, url=url, scope_url=scope_url,
+            chat_allowed=scope_host in submitted_hosts, evidence=evidence, categories=page.get("categories", []))
+
+    for position, document in enumerate(documents):
+        if document.get("error"):
+            continue
+        filename = str(document.get("filename") or "Uploaded document").strip()
+        content = str(document.get("content_text") or document.get("content") or "")
+        add(f"{position}:{filename}", filename, "document", content,
+            doc_type=str(document.get("doc_type") or "document"),
+            evidence=[evidence_record("", content, "uploaded_document", f"upload:{position}:{filename}")])
+
+    notes = (business_description or "").strip()
+    if notes:
+        add("business-description", "Business description", "user_context", notes,
+            evidence=[evidence_record("", notes, "user_note", "input.business_description")])
+    return chunks
+
+
+async def ingest_report_chunks(report_id: str, chunks: list[dict]) -> int:
+    """Embed verified chunks and upsert them in this report's v3 namespace."""
+    if not chunks or not PINECONE_API_KEY:
+        return 0
+    vectors = await _embed_texts_async([chunk["text"] for chunk in chunks])
+    if len(vectors) != len(chunks):
+        raise RAGIngestError("[RAG] Vector count does not match report chunk count")
+    try:
+        index = await asyncio.to_thread(_get_pinecone_index)
+        namespace = _chat_collection_name(report_id)
+        records = [{
+            "id": chunk["chunk_id"],
+            "values": vector,
+            "metadata": {
+                "source": chunk["source"],
+                "source_type": chunk["source_type"],
+                "type": chunk["type"],
+                "url": chunk["url"],
+                "chunk_idx": chunk["chunk_idx"],
+                "chat_allowed": bool(chunk["chat_allowed"]),
+                "text": chunk["text"],
+                "report_id": report_id,
+                "extraction_version": chunk["extraction_version"],
+            },
+        } for chunk, vector in zip(chunks, vectors)]
+        for offset in range(0, len(records), 100):
+            await asyncio.to_thread(index.upsert, vectors=records[offset:offset + 100], namespace=namespace)
+        return len(records)
+    except Exception as exc:
+        raise RAGIngestError(f"[RAG] Report chunk upsert failed: {exc}") from exc
 
 
 async def ingest_document(
@@ -279,24 +437,18 @@ async def ingest_scraped_pages(report_id: str, pages: list) -> int:
     if not pages:
         return 0
 
-    # Rank and select top informative pages (homepage, pricing, products, solutions, about)
-    ranked_pages = []
+    # Index every crawled page so chat retrieval can find facts beyond the
+    # handful of pages selected for the report's initial synthesis.
+    indexed_pages = []
     for page in pages:
         text = (page.get("text") or page.get("content") or "").strip()
         if len(text) < 50:
             continue
-        url = (page.get("url") or "").lower()
-        score = len(text)
-        if any(kw in url for kw in ("pricing", "feature", "product", "solution", "about", "contact")):
-            score += 5000
-        ranked_pages.append((score, page))
+        indexed_pages.append(page)
 
-    ranked_pages.sort(key=lambda x: x[0], reverse=True)
-    selected_pages = [p for _, p in ranked_pages[:8]]  # Top 8 most valuable pages
-
-    # Collect all chunks across selected pages
+    # Collect chunks across every crawled page.
     all_chunks_data = []
-    for page in selected_pages:
+    for page in indexed_pages:
         text = page.get("text") or page.get("content") or ""
         title = page.get("title") or page.get("url") or "Web Page"
         url = page.get("url") or ""
@@ -313,12 +465,11 @@ async def ingest_scraped_pages(report_id: str, pages: list) -> int:
     if not all_chunks_data:
         return 0
 
-    # Cap total chunks to 80 (well within Gemini batch limits)
-    all_chunks_data = all_chunks_data[:80]
+    # Embed in supported batches below; do not discard long-tail site pages.
     texts_to_embed = [c["text"] for c in all_chunks_data]
 
     logger.info(
-        f"[RAG] Batch-embedding {len(texts_to_embed)} chunks across {len(selected_pages)} pages via Gemini..."
+        f"[RAG] Batch-embedding {len(texts_to_embed)} chunks across {len(indexed_pages)} pages via Gemini..."
     )
     vectors = await _embed_texts_async(texts_to_embed, task_type="RETRIEVAL_DOCUMENT")
 
@@ -353,7 +504,7 @@ async def ingest_scraped_pages(report_id: str, pages: list) -> int:
             )
 
         logger.info(
-            f"[RAG] Successfully ingested {len(vectors_to_upsert)} chunks across {len(selected_pages)} pages "
+            f"[RAG] Successfully ingested {len(vectors_to_upsert)} chunks across {len(indexed_pages)} pages "
             f"in a single batch → namespace '{namespace}'"
         )
         return len(vectors_to_upsert)
@@ -387,7 +538,13 @@ async def ingest_processed_docs(report_id: str, processed_docs: list) -> int:
 
 # ─────────────────────────── Retrieve ──────────────────────────────────────
 
-def _retrieve_sync(report_id: str, query: str, top_k: int) -> list:
+def _retrieve_sync(
+    report_id: str,
+    query: str,
+    top_k: int,
+    source_labels: list[str] | None = None,
+    chat_only: bool = False,
+) -> list:
     """
     Embed query, search Pinecone, return ranked chunk dicts.
     Raises RAGQuotaError on Gemini quota/auth failure.
@@ -401,18 +558,26 @@ def _retrieve_sync(report_id: str, query: str, top_k: int) -> list:
 
     try:
         index = _get_pinecone_index()
-        namespace = _collection_name(report_id)
-        
-        results = index.query(
-            vector=query_vector,
-            top_k=top_k,
-            namespace=namespace,
-            include_metadata=True
-        )
-        
-        matches = results.get("matches", [])
-        if not matches:
-             return []
+        matches = []
+        # Historical reports still use the original namespace. The v2 lookup
+        # lets newer reports use stable chunk IDs without mixing both layouts.
+        namespaces = (_chat_collection_name(report_id),) if chat_only else (_chat_collection_name(report_id), _collection_name(report_id))
+        for namespace in namespaces:
+            query_args = dict(
+                vector=query_vector,
+                top_k=top_k,
+                namespace=namespace,
+                include_metadata=True,
+            )
+            if chat_only:
+                query_args["filter"] = {"$and": [{"chat_allowed": {"$eq": True}},
+                    {"report_id": {"$eq": report_id}}, {"extraction_version": {"$eq": 3}}]}
+            elif namespace == _collection_name(report_id) and source_labels:
+                query_args["filter"] = {"source": {"$in": source_labels}}
+            results = index.query(**query_args)
+            matches = results.get("matches", [])
+            if matches:
+                break
              
     except (RAGRetrieveError, RAGQuotaError):
         raise
@@ -421,11 +586,17 @@ def _retrieve_sync(report_id: str, query: str, top_k: int) -> list:
 
     return [
         {
+            "chunk_id": match.id,
+            "report_id": match.metadata.get("report_id"),
+            "extraction_version": match.metadata.get("extraction_version"),
             "text": match.metadata.get("text", ""),
             "source": match.metadata.get("source", "Unknown"),
             "type": match.metadata.get("type", "document"),
+            "source_type": match.metadata.get("source_type", match.metadata.get("type", "document")),
+            "url": match.metadata.get("url", ""),
             "chunk_idx": match.metadata.get("chunk_idx", 0),
             "relevance": round(match.score, 4),
+            "retrieval_method": "vector",
         }
         for match in matches
     ]
@@ -472,15 +643,30 @@ async def retrieve_context(report_id: str, query: str, top_k: int = DEFAULT_TOP_
     return "\n".join(lines)
 
 
+async def retrieve_chunks(
+    report_id: str,
+    query: str,
+    top_k: int = 20,
+    source_labels: list[str] | None = None,
+    chat_only: bool = False,
+) -> list[dict]:
+    """Return ranked chunks for a report without formatting them into a prompt."""
+    return await asyncio.to_thread(_retrieve_sync, report_id, query, top_k, source_labels, chat_only)
+
+
 # ─────────────────────────── Cleanup ───────────────────────────────────────
 
 def delete_report_collection(report_id: str) -> None:
     """Remove the Pinecone namespace for a given report."""
     try:
         index = _get_pinecone_index()
-        namespace = _collection_name(report_id)
-        index.delete(delete_all=True, namespace=namespace)
-        logger.info(f"[RAG] Deleted namespace '{namespace}'")
+        for namespace in (_chat_collection_name(report_id), f"{_collection_name(report_id)[:60]}-v2", _collection_name(report_id)):
+            try:
+                index.delete(delete_all=True, namespace=namespace)
+                logger.info("[RAG] Deleted namespace '%s'", namespace)
+            except Exception as exc:
+                if "404" not in str(exc):
+                    logger.warning("[RAG] Could not delete namespace '%s': %s", namespace, exc)
     except Exception as e:
         logger.warning(f"[RAG] Could not delete namespace for {report_id}: {e}")
 
