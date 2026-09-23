@@ -42,6 +42,7 @@ import {
   Flame,
   FileCheck2,
   Sliders,
+  MessageSquare,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -83,6 +84,7 @@ import { LeadRadarModule } from "@/components/modules/radar";
 import { VoiceFleetModule } from "@/components/modules/voice";
 import { VideoMeetingModule } from "@/components/modules/video";
 import { CalendarModule } from "@/components/modules/calendar";
+import { WhatsAppModule } from "@/components/modules/whatsapp";
 import { AnalyticsModule } from "@/components/modules/analytics";
 import { SettingsModule } from "@/components/modules/settings";
 import { MODULE_REGISTRY } from "@/modules/registry";
@@ -1861,8 +1863,8 @@ function DashboardPage() {
 
   const navItems = MODULE_REGISTRY.map((mod) => ({
     ...mod,
-    // Enable all modules as soon as any business report has finished
-    isUnlocked: mod.id === "intelligence" || hasCompletedReport,
+    // Enable all modules as soon as any business report has finished, or always for utility modules
+    isUnlocked: mod.id === "intelligence" || mod.id === "whatsapp" || mod.id === "calendar" || mod.id === "settings" || hasCompletedReport,
   }));
 
   return (
@@ -1880,6 +1882,15 @@ function DashboardPage() {
             <Logo />
           </div>
           <div className="flex items-center gap-4">
+            <button
+              onClick={() => setActiveNav("whatsapp")}
+              title="Open WhatsApp Business Gateway"
+              className="hidden sm:flex items-center gap-1.5 border border-lime/40 bg-lime/10 px-2.5 py-1 text-lime-800 dark:text-lime label-mono text-[10px] font-bold hover:bg-lime/20 transition-colors"
+            >
+              <MessageSquare className="w-3 h-3 text-lime-600 dark:text-lime" />
+              <span>WhatsApp Gateway</span>
+            </button>
+
             {hasCompletedReport ? (
               <div className="hidden sm:flex items-center gap-2 border border-lime/40 bg-lime/10 px-3 py-1 text-lime-700 dark:text-lime label-mono text-[10px] font-bold">
                 <Sparkles className="w-3 h-3" /> ALL MODULES UNLOCKED
@@ -2196,7 +2207,12 @@ function DashboardPage() {
               />
             )}
 
-            {/* 6. Analytics View */}
+            {/* 6. WhatsApp Business Gateway View */}
+            {activeNav === "whatsapp" && (
+              <WhatsAppModule companyName={activeCompanyInfo.name} />
+            )}
+
+            {/* 7. Analytics View */}
             {activeNav === "analytics" && (
               <AnalyticsModule
                 analysis={activeAnalysis}

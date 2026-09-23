@@ -17,6 +17,7 @@ import {
   Sparkles,
   Video,
   Calendar as CalendarIcon,
+  MessageSquare,
   BarChart3,
   Settings,
   type LucideIcon,
@@ -84,6 +85,15 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
     badge: "Meetings",
     description: "AI-scheduled meetings, Google Meet rooms, reminder alerts, and call follow-ups.",
     componentPath: "modules/calendar",
+  },
+  {
+    id: "whatsapp",
+    label: "WhatsApp Business",
+    icon: MessageSquare,
+    enabled: true,
+    badge: "Zero-TaxID",
+    description: "Zero-verification WhatsApp Business gateway for automated post-call meeting links and requirements recap messaging.",
+    componentPath: "modules/whatsapp",
   },
   {
     id: "analytics",
