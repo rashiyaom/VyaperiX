@@ -52,7 +52,10 @@ export function SiteHeader() {
   }, []);
 
   useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 4);
+    const onScroll = () => {
+      setScrolled(window.scrollY > 20);
+    };
+    onScroll();
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
@@ -72,14 +75,16 @@ export function SiteHeader() {
     badge: item.badge,
   }));
 
+  const headerClasses = [
+    "sticky top-0 z-50 w-full max-w-full transition-all duration-300",
+    "bg-paper/85 dark:bg-[#0D0E14]/85 backdrop-blur-2xl border-b border-ink/20 shadow-[0_10px_35px_rgba(0,0,0,0.08)] dark:shadow-[0_10px_35px_rgba(0,0,0,0.5)] dark:border-white/15",
+    scrolled ? "py-1" : "py-0",
+  ].join(" ");
+
   return (
     <header
-      className={`sticky top-0 z-50 w-full max-w-full transition-all duration-300 ${
-        scrolled
-          ? "bg-paper/70 dark:bg-[#0D0E14]/75 backdrop-blur-2xl border-b border-ink/20 shadow-[0_10px_35px_rgba(0,0,0,0.09)] dark:shadow-[0_10px_35px_rgba(0,0,0,0.5)] dark:border-white/15 py-1"
-          : "bg-paper/95 dark:bg-[#0D0E14]/95 border-b border-ink/15 backdrop-blur-md py-0"
-      }`}
-      style={{ WebkitBackdropFilter: scrolled ? "blur(24px)" : "blur(12px)" }}
+      className={headerClasses}
+      style={{ WebkitBackdropFilter: "blur(24px)" }}
     >
       <div className="mx-auto flex max-w-[1400px] items-center justify-between gap-2 px-3 py-2.5 sm:px-6 sm:py-3 lg:px-8 w-full">
         {/* Left: Logo & Desktop Navigation */}
@@ -127,6 +132,7 @@ export function SiteHeader() {
     </header>
   );
 }
+
 
 export function SiteFooter() {
   const { t } = useLang();

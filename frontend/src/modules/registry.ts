@@ -21,6 +21,7 @@ import {
   Share2,
   BarChart3,
   Settings,
+  LayoutDashboard,
   type LucideIcon,
 } from "lucide-react";
 
@@ -42,6 +43,15 @@ export interface ModuleDefinition {
 }
 
 export const MODULE_REGISTRY: ModuleDefinition[] = [
+  {
+    id: "overview",
+    label: "Command Center",
+    icon: LayoutDashboard,
+    enabled: true,
+    badge: "Live",
+    description: "Real-time cross-module command center — KPIs, graphs, activity feed, module health.",
+    componentPath: "modules/overview",
+  },
   {
     id: "intelligence",
     label: "Intelligence Suite",

@@ -89,7 +89,10 @@ import { WhatsAppModule } from "@/components/modules/whatsapp";
 import { CRMModule } from "@/components/modules/crm";
 import { AnalyticsModule } from "@/components/modules/analytics";
 import { SettingsModule } from "@/components/modules/settings";
+import { OverviewDashboard } from "@/components/modules/overview";
 import { MODULE_REGISTRY } from "@/modules/registry";
+import { ThemeToggle } from "@/components/app/theme";
+import { LangSwitcher } from "@/components/app/lang";
 
 export const Route = createFileRoute("/dashboard")({
   head: () => ({
@@ -1765,7 +1768,28 @@ function DashboardPage() {
   const navigate = useNavigate();
   const { user, profile, session, signOut } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [activeNav, setActiveNav] = useState("intelligence");
+  const [activeNav, setActiveNav] = useState(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const tabParam = params.get("tab");
+      if (tabParam) return tabParam;
+      const stored = localStorage.getItem("vyaperi_active_nav");
+      if (stored) return stored;
+    }
+    return "overview";
+  });
+
+  const handleSelectNav = (navId: string) => {
+    setActiveNav(navId);
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.setItem("vyaperi_active_nav", navId);
+        const url = new URL(window.location.href);
+        url.searchParams.set("tab", navId);
+        window.history.replaceState(null, "", url.toString());
+      } catch {}
+    }
+  };
   const [voiceTargetLead, setVoiceTargetLead] = useState<any>(null);
   const [reportId, setReportId] = useState<string | null>(() => {
     if (typeof window !== "undefined") {
@@ -1781,7 +1805,14 @@ function DashboardPage() {
     }
     return "intake";
   });
-  const [recentReports, setRecentReports] = useState<RecentReport[]>([]);
+  const [recentReports, setRecentReports] = useState<RecentReport[]>(() => {
+    // Seed from session cache so data is always present on refresh — no flash
+    try {
+      const cached = sessionStorage.getItem("vyaperi_reports_cache");
+      if (cached) return JSON.parse(cached) as RecentReport[];
+    } catch {}
+    return [];
+  });
   const [activeAnalysis, setActiveAnalysis] = useState<FullAnalysis | null>(null);
   const [activeCompanyInfo, setActiveCompanyInfo] = useState<{ name: string; industry: string; score: number }>({
     name: "",
@@ -1818,7 +1849,10 @@ function DashboardPage() {
         }
       }
     } catch {}
-    fetchRecents();
+    // Only fetch when we have a settled user ID — avoids double-fire during auth hydration
+    if (userId && userId !== "undefined" && userId !== "null") {
+      fetchRecents();
+    }
   }, [userId, profile]);
 
   const fetchRecents = async () => {
@@ -1832,7 +1866,9 @@ function DashboardPage() {
       const res = await safeApiFetch(url, { headers });
       if (res.ok) {
         const data = await res.json();
+        // Update state and persist to session cache — prevents flash on next refresh
         setRecentReports(data);
+        try { sessionStorage.setItem("vyaperi_reports_cache", JSON.stringify(data)); } catch {}
         const latestDone = data.find((r: any) => r.status === "done" && r.analysis?.company_name);
         if (latestDone) {
           setActiveCompanyInfo({
@@ -1894,13 +1930,13 @@ function DashboardPage() {
   };
 
   const handleNavigateModule = (moduleId: string) => {
-    setActiveNav(moduleId);
+    handleSelectNav(moduleId);
   };
 
   const navItems = MODULE_REGISTRY.map((mod) => ({
     ...mod,
-    // Enable all modules as soon as any business report has finished
-    isUnlocked: mod.id === "intelligence" || hasCompletedReport,
+    // overview is always unlocked; others unlock after first completed report
+    isUnlocked: mod.id === "overview" || mod.id === "intelligence" || hasCompletedReport,
   }));
 
   return (
@@ -1933,6 +1969,13 @@ function DashboardPage() {
                 Workspace: <span className="text-ink font-bold">{greeting.company}</span>
               </span>
             )}
+
+            {/* 🌓 Dark / Light Mode Toggle */}
+            <ThemeToggle className="p-1 sm:p-2" />
+
+            {/* 🌐 Multi-Language Switcher */}
+            <LangSwitcher />
+
             <div className="hidden sm:block border border-ink/20 px-3 py-1.5 font-mono text-[10px] text-muted-foreground">
               <div>SYS.TIME</div>
               <div className="text-ink">{time}</div>
@@ -1984,7 +2027,7 @@ function DashboardPage() {
                 <button
                   key={item.id}
                   onClick={() => {
-                    if (isUnlocked) setActiveNav(item.id);
+                    if (isUnlocked) handleSelectNav(item.id);
                   }}
                   className={`w-full flex items-center gap-3 px-3 py-2.5 transition-all group ${
                     isActive
@@ -2028,7 +2071,7 @@ function DashboardPage() {
                 <button
                   key={r.id}
                   onClick={() => {
-                    setActiveNav("intelligence");
+                    handleSelectNav("intelligence");
                     handleSelectReport(r);
                   }}
                   className="w-full text-left border border-transparent hover:border-ink/20 p-2 hover:bg-secondary transition-colors group min-w-0 overflow-hidden"
@@ -2059,6 +2102,18 @@ function DashboardPage() {
         {/* ── Main Content Area ── */}
         <main className="flex-1 overflow-y-auto min-w-0">
           <div className="max-w-[1250px] mx-auto p-6 space-y-6">
+            {/* 0. Command Center Overview */}
+            {activeNav === "overview" && (
+              <OverviewDashboard
+                onNavigate={(mod) => {
+                  if (mod === "intelligence") {
+                    setView("intake");
+                  }
+                  handleSelectNav(mod);
+                }}
+              />
+            )}
+
             {/* 1. Intelligence Suite View */}
             {activeNav === "intelligence" && (
               <div className="space-y-6">

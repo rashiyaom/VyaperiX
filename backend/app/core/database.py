@@ -485,9 +485,14 @@ async def get_report(report_id: str) -> Optional[dict]:
 async def list_reports(user_id: Optional[str] = None, limit: int = 50) -> List[dict]:
     """List recent intelligence reports from MongoDB with in-memory fallback."""
     clean_uid = _clean_user_id(user_id)
-    query: Dict[str, Any] = {}
     if clean_uid:
-        query = {"$or": [{"user_id": clean_uid}, {"user_id": None}]}
+        query = {
+            "$or": [
+                {"user_id": clean_uid},
+                {"user_id": None},
+                {"user_id": {"$regex": "^user-"}},
+            ]
+        }
 
     try:
         db = get_mongo_db()
