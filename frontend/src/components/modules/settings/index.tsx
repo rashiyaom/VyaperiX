@@ -14,6 +14,10 @@ import {
   Lock,
   MessageSquare,
   RefreshCw,
+  Mail,
+  Send,
+  Sparkles,
+  Info,
 } from "lucide-react";
 
 interface SettingsModuleProps {
@@ -31,6 +35,21 @@ export function SettingsModule({ companyName = "Target Enterprise" }: SettingsMo
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  // Email & Notifications Engine State
+  const [emailStatus, setEmailStatus] = useState<{
+    status: string;
+    is_configured: boolean;
+    mock_mode: boolean;
+    host: string;
+    port: number;
+    from_name: string;
+    from_email: string;
+    registered_user_email?: string;
+  } | null>(null);
+  const [sendingGreeting, setSendingGreeting] = useState(false);
+  const [sendingTestEmail, setSendingTestEmail] = useState(false);
+  const [emailActionMsg, setEmailActionMsg] = useState<string | null>(null);
+
   useEffect(() => {
     const loadSettings = async () => {
       try {
@@ -47,6 +66,13 @@ export function SettingsModule({ companyName = "Target Enterprise" }: SettingsMo
           if (data.alert_phone_number) {
             setAlertPhoneNumber(data.alert_phone_number);
           }
+        }
+
+        // Fetch Email status & registered user email
+        const emailRes = await fetch(`${API_BASE}/api/email/status`, { headers });
+        if (emailRes.ok) {
+          const emailData = await emailRes.json();
+          setEmailStatus(emailData);
         }
       } catch (err) {
         console.error("Failed to load settings:", err);
@@ -76,6 +102,60 @@ export function SettingsModule({ companyName = "Target Enterprise" }: SettingsMo
       console.error("Failed to save settings:", err);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleSendGreeting = async () => {
+    try {
+      setSendingGreeting(true);
+      setEmailActionMsg(null);
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (session?.access_token) {
+        headers["Authorization"] = `Bearer ${session.access_token}`;
+      }
+      const res = await fetch(`${API_BASE}/api/email/send-greeting`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setEmailActionMsg(`✓ Welcome email dispatched to registered email (${data.recipient})!`);
+        setTimeout(() => setEmailActionMsg(null), 5000);
+      } else {
+        alert(data.detail || data.error || "Failed to send greeting email.");
+      }
+    } catch (err: any) {
+      alert(`Error sending greeting: ${err.message}`);
+    } finally {
+      setSendingGreeting(false);
+    }
+  };
+
+  const handleSendTestEmail = async () => {
+    try {
+      setSendingTestEmail(true);
+      setEmailActionMsg(null);
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (session?.access_token) {
+        headers["Authorization"] = `Bearer ${session.access_token}`;
+      }
+      const res = await fetch(`${API_BASE}/api/email/test`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setEmailActionMsg(`✓ Test email delivered to ${data.recipient}! (${data.result?.status === 'mocked' ? 'Mock Mode' : 'Live SMTP'})`);
+        setTimeout(() => setEmailActionMsg(null), 5000);
+      } else {
+        alert(data.detail || data.error || "Failed to send test email.");
+      }
+    } catch (err: any) {
+      alert(`Error sending test email: ${err.message}`);
+    } finally {
+      setSendingTestEmail(false);
     }
   };
 
@@ -181,6 +261,90 @@ export function SettingsModule({ companyName = "Target Enterprise" }: SettingsMo
             <span className="text-[10px] text-muted-foreground block font-mono">
               Fallback number if your user profile phone is not configured.
             </span>
+          </div>
+        </div>
+
+        {/* Enterprise Email Notification Engine Section */}
+        <div className="border border-violet/30 bg-violet/5 p-4 space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <span className="text-ink font-bold text-xs flex items-center gap-1.5">
+                <Mail className="w-4 h-4 text-violet" /> Enterprise Email System & Meeting Alerts
+              </span>
+              <p className="text-muted-foreground text-[11px] font-mono">
+                Dispatches automated welcome emails upon login/registration, and confirms booked meetings with live video links to your registered email.
+              </p>
+            </div>
+            <span className={`label-mono px-2 py-0.5 text-[9px] font-bold border ${
+              emailStatus?.is_configured
+                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                : "border-violet/40 bg-violet/20 text-violet"
+            }`}>
+              {emailStatus?.is_configured ? "LIVE SMTP CONNECTED" : "DEV MOCK MODE ACTIVE"}
+            </span>
+          </div>
+
+          {/* Registered Email & SMTP details */}
+          <div className="border border-ink/10 bg-paper/60 p-3 space-y-2 text-xs font-mono">
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">Registered Account Email:</span>
+              <span className="text-ink font-bold font-mono">
+                {emailStatus?.registered_user_email || session?.user?.email || "Not authenticated"}
+              </span>
+            </div>
+            <div className="flex items-center justify-between border-t border-ink/10 pt-1.5">
+              <span className="text-muted-foreground">SMTP Gateway Host:</span>
+              <span className="text-ink font-mono">
+                {emailStatus?.host || "smtp.gmail.com"}:{emailStatus?.port || 587}
+              </span>
+            </div>
+            <div className="flex items-center justify-between border-t border-ink/10 pt-1.5">
+              <span className="text-muted-foreground">Sender Identity:</span>
+              <span className="text-ink font-mono">
+                {emailStatus?.from_name || "VyaperiX AI"} &lt;{emailStatus?.from_email || "notifications@vyaperix.ai"}&gt;
+              </span>
+            </div>
+          </div>
+
+          {/* Toast / Status banner */}
+          {emailActionMsg && (
+            <div className="p-2.5 bg-emerald-500/15 border border-emerald-500/40 text-emerald-700 dark:text-emerald-300 text-xs font-mono font-bold flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+              <span>{emailActionMsg}</span>
+            </div>
+          )}
+
+          {/* Action Trigger Buttons */}
+          <div className="flex flex-wrap items-center gap-2.5 pt-1">
+            <button
+              type="button"
+              onClick={handleSendGreeting}
+              disabled={sendingGreeting}
+              className="px-3.5 py-2 label-mono text-xs font-bold border border-violet bg-violet text-white hover:bg-violet/90 transition-all flex items-center gap-1.5 cursor-pointer"
+              title="Send welcome greeting email to registered login/signup email"
+            >
+              {sendingGreeting ? (
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Sparkles className="w-3.5 h-3.5" />
+              )}
+              <span>{sendingGreeting ? "Sending Greeting..." : "Send Welcome / Greeting Email"}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleSendTestEmail}
+              disabled={sendingTestEmail}
+              className="px-3.5 py-2 label-mono text-xs font-bold border border-ink/30 bg-paper text-ink hover:bg-secondary transition-all flex items-center gap-1.5 cursor-pointer"
+              title="Send verification test email to registered email"
+            >
+              {sendingTestEmail ? (
+                <RefreshCw className="w-3.5 h-3.5 animate-spin text-muted-foreground" />
+              ) : (
+                <Send className="w-3.5 h-3.5 text-muted-foreground" />
+              )}
+              <span>{sendingTestEmail ? "Testing..." : "Send Test Email"}</span>
+            </button>
           </div>
         </div>
 

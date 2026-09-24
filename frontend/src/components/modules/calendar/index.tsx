@@ -53,6 +53,8 @@ export interface CalendarEventRecord {
   suggested_alternate_end?: string;
   whatsapp_status?: string;
   whatsapp_sent_at?: string;
+  email_status?: string;
+  email_sent_at?: string;
   reminder_minutes: number;
   remind_via: string;
   google_event_id?: string;
@@ -101,6 +103,7 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
   const [formDuration, setFormDuration] = useState(30);
   const [formType, setFormType] = useState<"google_meet" | "phone_call">("google_meet");
   const [formReminder, setFormReminder] = useState(15);
+  const [formSendConfirmation, setFormSendConfirmation] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
   // Fetch events
@@ -192,6 +195,32 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
     }
   };
 
+  // Meeting Confirmation Email Dispatch Handler
+  const [emailSending, setEmailSending] = useState(false);
+
+  const handleSendMeetingEmail = async (eventId: string, customerEmail?: string) => {
+    try {
+      setEmailSending(true);
+      const headers: Record<string, string> = {};
+      if (session?.access_token) {
+        headers["Authorization"] = `Bearer ${session.access_token}`;
+      }
+      const url = `${API_BASE}/api/calendar/events/${eventId}/send-email${customerEmail ? `?recipient_email=${encodeURIComponent(customerEmail)}` : ""}`;
+      const res = await fetch(url, { method: "POST", headers });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        triggerSuccess(`✓ Meeting invitation email dispatched to ${data.rep_email || data.customer_email || "registered email"}!`);
+        fetchEvents();
+      } else {
+        alert(data.detail || data.error || "Failed to dispatch meeting email. Check SMTP settings or mock mode.");
+      }
+    } catch (e: any) {
+      alert(`Error sending email: ${e.message}`);
+    } finally {
+      setEmailSending(false);
+    }
+  };
+
   // Quick Action: Mark Done ("completed")
   const handleMarkDone = async (e: React.MouseEvent, eventId: string, currentStatus: string) => {
     e.stopPropagation();
@@ -259,11 +288,17 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
         meeting_type: formType,
         reminder_minutes: Number(formReminder),
         remind_via: "popup",
+        send_customer_confirmation: formSendConfirmation,
       };
+
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (session?.access_token) {
+        headers["Authorization"] = `Bearer ${session.access_token}`;
+      }
 
       const res = await fetch(`${API_BASE}/api/calendar/events`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify(payload),
       });
 
@@ -274,7 +309,11 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
         }
         setShowCreateModal(false);
         resetForm();
-        triggerSuccess("✓ Meeting scheduled with Google Meet & Reminders set!");
+        triggerSuccess(
+          formSendConfirmation
+            ? "✓ Meeting scheduled! Invitation email & live meeting link sent to registered email & client."
+            : "✓ Meeting scheduled with Google Meet & Reminders set!"
+        );
       }
     } catch (err) {
       console.error("Failed to create event:", err);
@@ -292,6 +331,7 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
     setFormDuration(30);
     setFormType("google_meet");
     setFormReminder(15);
+    setFormSendConfirmation(true);
   };
 
   // Filtered Events
@@ -1264,6 +1304,21 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
 
                 <button
                   type="button"
+                  onClick={() => handleSendMeetingEmail(selectedEvent.id, selectedEvent.customer_email)}
+                  disabled={emailSending}
+                  className="flex items-center gap-1.5 px-3 py-2 label-mono text-xs font-bold border border-violet/40 bg-violet/10 text-violet dark:text-violet-300 hover:bg-violet/20 transition-all"
+                  title="Send meeting confirmation email with live video link to registered login email and client"
+                >
+                  {emailSending ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-violet" />
+                  ) : (
+                    <Mail className="w-3.5 h-3.5 text-violet" />
+                  )}
+                  <span>{emailSending ? "Sending..." : "Send Email"}</span>
+                </button>
+
+                <button
+                  type="button"
                   onClick={(e) => handleMarkDone(e, selectedEvent.id, selectedEvent.status)}
                   className={`flex items-center gap-1.5 px-4 py-2 label-mono text-xs font-bold border transition-all ${
                     selectedEvent.status === "completed"
@@ -1418,6 +1473,20 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
                   onChange={(e) => setFormDescription(e.target.value)}
                   className="w-full border border-ink/30 bg-paper px-3 py-2 text-ink placeholder-muted-foreground focus:outline-none focus:border-violet"
                 />
+              </div>
+
+              <div className="flex items-center gap-2 pt-1 border-t border-ink/10">
+                <input
+                  type="checkbox"
+                  id="formSendConfirmation"
+                  checked={formSendConfirmation}
+                  onChange={(e) => setFormSendConfirmation(e.target.checked)}
+                  className="rounded border-ink/30 text-violet focus:ring-violet cursor-pointer"
+                />
+                <label htmlFor="formSendConfirmation" className="label-mono text-ink text-[11px] cursor-pointer flex items-center gap-1.5 select-none">
+                  <Mail className="w-3.5 h-3.5 text-violet" />
+                  <span>Send meeting link email to registered login email & client</span>
+                </label>
               </div>
 
               <div className="pt-2 flex items-center justify-end gap-2.5">

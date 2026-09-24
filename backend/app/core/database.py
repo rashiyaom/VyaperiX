@@ -265,6 +265,27 @@ async def get_profile_by_email(email: str) -> Optional[dict]:
             return p
     return None
 
+async def get_workspace_owner_profile() -> Optional[dict]:
+    """Fetch the workspace owner profile from MongoDB with memory fallback."""
+    try:
+        db = get_mongo_db()
+        # Find explicit owner
+        doc = await db["profiles"].find_one({"role": "owner"})
+        if not doc:
+            # Fallback to first profile registered
+            doc = await db["profiles"].find_one({})
+        if doc:
+            return _clean_doc(doc)
+    except Exception as e:
+        logger.warning(f"MongoDB get_workspace_owner_profile error: {e}")
+
+    for p in _in_memory_profiles.values():
+        if p.get("role") == "owner":
+            return p
+    if _in_memory_profiles:
+        return next(iter(_in_memory_profiles.values()))
+    return None
+
 async def upsert_profile(user_id: str, profile_data: dict) -> dict:
     """Insert or update user profile and onboarding data in MongoDB."""
     clean_uid = _clean_user_id(user_id) or str(uuid.uuid4())
@@ -945,10 +966,10 @@ async def list_calendar_events(
 ) -> List[dict]:
     """List calendar events from MongoDB filtered by user, status, date bounds, or customer name strictly isolated per user."""
     clean_uid = _clean_user_id(user_id)
-    if not clean_uid:
-        return []
 
-    query: Dict[str, Any] = {"user_id": clean_uid}
+    query: Dict[str, Any] = {}
+    if clean_uid:
+        query["user_id"] = clean_uid
     if status and status != "all":
         query["status"] = status
     if start_date:
@@ -968,7 +989,7 @@ async def list_calendar_events(
         return [_clean_doc(d) for d in docs]
     except Exception as e:
         logger.warning(f"MongoDB list_calendar_events error: {e}")
-        events = [e for e in _in_memory_calendar_events.values() if e.get("user_id") == clean_uid]
+        events = [e for e in _in_memory_calendar_events.values() if not clean_uid or e.get("user_id") == clean_uid]
         if status and status != "all":
             events = [e for e in events if e.get("status") == status]
         if customer_name:

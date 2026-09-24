@@ -22,6 +22,7 @@ from app.core import auth_middleware
 from app.core import database as db
 from app.services import calendar_service
 from app.services import sms_service
+from app.services import email_service
 
 logger = logging.getLogger(__name__)
 
@@ -221,6 +222,48 @@ async def create_event(
     except Exception as sms_err:
         logger.warning(f"SMS notification failed after event creation: {sms_err}")
 
+    # Email notification to workspace owner, registered rep, and customer
+    try:
+        owner_email = await email_service.resolve_workspace_owner_email(resolved_user_id)
+        rep_email = await email_service.resolve_user_registered_email(resolved_user_id)
+        meeting_time_str = str(payload.start_time)
+        try:
+            dt = datetime.fromisoformat(meeting_time_str.replace("Z", "+00:00"))
+            formatted_time = dt.strftime("%Y-%m-%d %H:%M UTC")
+        except Exception:
+            formatted_time = meeting_time_str
+
+        if owner_email or rep_email or payload.customer_email:
+            email_res = await email_service.send_meeting_email(
+                rep_email=rep_email or "",
+                prospect_email=payload.customer_email if payload.send_customer_confirmation else None,
+                lead_name=payload.customer_name,
+                meeting_time=formatted_time,
+                meeting_link=event_data.get("meet_url") or "",
+                title=payload.title,
+                agenda=payload.description or "",
+                customer_phone=payload.customer_phone,
+                company_name=payload.company_name,
+                send_to_prospect=bool(payload.send_customer_confirmation and payload.customer_email),
+                owner_email=owner_email,
+                user_id=resolved_user_id,
+                source="calendar_event_created",
+            )
+            event_data["email_status"] = "dispatched"
+            event_data["email_owner"] = owner_email
+            event_data["email_rep"] = rep_email
+            event_data["email_customer"] = payload.customer_email
+            event_data["email_sent"] = True
+            await db.update_calendar_event(event_id, {
+                "email_status": "dispatched",
+                "email_owner": owner_email,
+                "email_rep": rep_email,
+                "email_customer": payload.customer_email,
+                "email_sent": True,
+            })
+    except Exception as email_err:
+        logger.warning(f"Email notification failed after event creation: {email_err}")
+
     return {"message": "Meeting scheduled successfully", "event": event_data}
 
 
@@ -333,6 +376,41 @@ async def extract_and_book_from_call(call_id: str):
     except Exception as sms_err:
         logger.warning(f"SMS notification failed after AI meeting extraction for call {call_id}: {sms_err}")
 
+    # Email notification to workspace owner, registered rep, and customer for AI call meeting extraction
+    try:
+        call_user_id = call.get("user_id")
+        owner_email = await email_service.resolve_workspace_owner_email(call_user_id)
+        rep_email = await email_service.resolve_user_registered_email(call_user_id)
+        if owner_email or rep_email or event.get("customer_email"):
+            await email_service.send_meeting_email(
+                rep_email=rep_email or "",
+                prospect_email=event.get("customer_email"),
+                lead_name=event.get("customer_name") or "Lead",
+                meeting_time=event.get("start_time") or "",
+                meeting_link=event.get("meet_url") or "",
+                title=event.get("title") or "Discovery & Demo (from AI Call)",
+                agenda=f"Auto-booked from AI Call #{call_id}. Customer Phone: {event.get('customer_phone')}",
+                customer_phone=event.get("customer_phone"),
+                company_name=event.get("company_name") or call.get("business_name"),
+                send_to_prospect=bool(event.get("customer_email")),
+                owner_email=owner_email,
+                user_id=call_user_id,
+                source="ai_call",
+            )
+            event["email_status"] = "dispatched"
+            event["email_owner"] = owner_email
+            event["email_rep"] = rep_email
+            event["email_sent"] = True
+            if event.get("id"):
+                await db.update_calendar_event(event["id"], {
+                    "email_status": "dispatched",
+                    "email_owner": owner_email,
+                    "email_rep": rep_email,
+                    "email_sent": True,
+                })
+    except Exception as email_err:
+        logger.warning(f"Email notification failed after AI meeting extraction for call {call_id}: {email_err}")
+
     return {"message": "Meeting successfully extracted and booked", "event": event}
 
 
@@ -369,6 +447,69 @@ async def send_whatsapp_for_event(event_id: str, phone: Optional[str] = Query(No
         "customer_phone": target_phone,
     })
     return {"success": True, "message": "WhatsApp confirmation dispatched successfully", "result": res}
+
+
+@router.post("/events/{event_id}/send-email")
+async def send_email_for_event(
+    event_id: str,
+    recipient_email: Optional[str] = Query(None, description="Optional recipient email override"),
+    send_to_both: Optional[bool] = Query(True, description="Send to both rep and customer if available"),
+):
+    """
+    Manually dispatch or re-send meeting confirmation email with live video room link.
+    Delivers to registered sales rep email and/or prospect email.
+    """
+    event = await db.get_calendar_event(event_id)
+    if not event:
+        raise HTTPException(status_code=404, detail="Calendar event not found")
+
+    owner_email = await email_service.resolve_workspace_owner_email(event.get("user_id"))
+    rep_email = await email_service.resolve_user_registered_email(event.get("user_id"))
+    target_customer_email = recipient_email or event.get("customer_email")
+
+    if not owner_email and not rep_email and not target_customer_email:
+        raise HTTPException(
+            status_code=400,
+            detail="No valid recipient email (owner email, rep email, or customer email) found for this event."
+        )
+
+    meet_url = event.get("meet_url") or calendar_service.generate_live_video_room(
+        event.get("company_name"), event_id
+    )
+
+    res = await email_service.send_meeting_email(
+        rep_email=rep_email or "",
+        prospect_email=target_customer_email,
+        lead_name=event.get("customer_name") or "Valued Partner",
+        meeting_time=event.get("start_time") or "",
+        meeting_link=meet_url,
+        title=event.get("title") or "Discovery & Demo Meeting",
+        agenda=event.get("agenda") or event.get("description") or "",
+        customer_phone=event.get("customer_phone"),
+        company_name=event.get("company_name") or "VyaperiX",
+        send_to_prospect=bool(send_to_both and target_customer_email),
+        owner_email=owner_email,
+        user_id=event.get("user_id"),
+        source="manual_event_dispatch",
+    )
+
+    await db.update_calendar_event(event_id, {
+        "email_status": "sent",
+        "email_sent_at": datetime.now(timezone.utc).isoformat(),
+        "email_owner": owner_email,
+        "email_rep": rep_email,
+        "email_customer": target_customer_email,
+    })
+
+    return {
+        "success": True,
+        "message": f"Meeting confirmation email dispatched successfully to owner ({owner_email}) and participants",
+        "owner_email": owner_email,
+        "rep_email": rep_email,
+        "customer_email": target_customer_email,
+        "meet_url": meet_url,
+        "result": res,
+    }
 
 
 class ApproveBookingRequest(BaseModel):
@@ -476,11 +617,39 @@ async def approve_and_send_whatsapp(
 
     updates["whatsapp_status"] = "sent"
     updates["whatsapp_sent_at"] = datetime.now(timezone.utc).isoformat()
+
+    # Also dispatch meeting confirmation email to workspace owner, rep, and customer
+    try:
+        owner_email = await email_service.resolve_workspace_owner_email(event.get("user_id"))
+        rep_email = await email_service.resolve_user_registered_email(event.get("user_id"))
+        customer_email = updates.get("customer_email") or event.get("customer_email")
+        if owner_email or rep_email or customer_email:
+            await email_service.send_meeting_email(
+                rep_email=rep_email or "",
+                prospect_email=customer_email,
+                lead_name=event.get("customer_name") or "Valued Partner",
+                meeting_time=start_time_to_send,
+                meeting_link=meet_url,
+                title=event.get("title") or "Confirmed Discovery Session",
+                agenda=agenda_to_send,
+                customer_phone=target_phone,
+                company_name=event.get("company_name"),
+                send_to_prospect=bool(customer_email),
+                owner_email=owner_email,
+                user_id=event.get("user_id"),
+                source="approved_booking",
+            )
+            updates["email_status"] = "sent"
+            updates["email_sent_at"] = datetime.now(timezone.utc).isoformat()
+            updates["email_owner"] = owner_email
+    except Exception as email_err:
+        logger.warning(f"Email notification failed during booking approval: {email_err}")
+
     updated_event = await db.update_calendar_event(event_id, updates)
 
     return {
         "success": True,
-        "message": f"✓ Booking confirmed and WhatsApp dispatched to {target_phone} with Live Video link!",
+        "message": f"✓ Booking confirmed and notifications dispatched with Live Video link!",
         "event": updated_event,
         "whatsapp_result": wa_res,
         "meet_url": meet_url,
