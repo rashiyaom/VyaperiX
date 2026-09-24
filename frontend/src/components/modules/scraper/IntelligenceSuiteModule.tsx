@@ -160,6 +160,32 @@ export interface ReportData {
   analysis?: FullAnalysis;
 }
 
+/* ─── Ultra High-Contrast Cyberpunk Tooltip Props ─── */
+const tooltipBoxStyle: React.CSSProperties = {
+  backgroundColor: "#0D0E14",
+  borderWidth: "1px",
+  borderStyle: "solid",
+  borderColor: "#7C3AED",
+  borderRadius: 0,
+  padding: "8px 12px",
+  boxShadow: "0 10px 30px rgba(0,0,0,0.6)",
+};
+
+const tooltipItemStyle: React.CSSProperties = {
+  color: "#ffffff",
+  fontFamily: "monospace",
+  fontSize: "11px",
+  fontWeight: "bold",
+};
+
+const tooltipLabelStyle: React.CSSProperties = {
+  color: "#A3E635",
+  fontFamily: "monospace",
+  fontSize: "11px",
+  fontWeight: "bold",
+  marginBottom: "4px",
+};
+
 /* ─── Shared Brut Panel ─── */
 function Panel({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return <div className={`border border-ink bg-card min-w-0 overflow-hidden ${className}`}>{children}</div>;
@@ -717,7 +743,7 @@ function ReportView({
   }
 
   // 4. ICP Customer Deal Size Donut Data (strictly from Groq target_customers)
-  const COLORS = ["#7C3AED", "#A3E635", "#111111", "#f59e0b", "#06b6d4"];
+  const COLORS = ["#8B5CF6", "#10B981", "#F59E0B", "#06B6D4", "#EC4899", "#3B82F6"];
   const pieData =
     customers.length > 0
       ? customers.map((c) => ({
@@ -975,20 +1001,18 @@ function ReportView({
                   <Radar
                     name="Competitor Avg"
                     dataKey="marketAvg"
-                    stroke="#111111"
-                    fill="#111111"
-                    fillOpacity={0.15}
+                    stroke="#6B7280"
+                    fill="#6B7280"
+                    fillOpacity={0.25}
                   />
-                  <Legend wrapperStyle={{ fontFamily: "monospace", fontSize: "10px" }} />
+                  <Legend
+                    wrapperStyle={{ fontFamily: "monospace", fontSize: "11px", paddingTop: "8px" }}
+                    formatter={(value) => <span className="text-ink font-mono font-semibold text-[11px] ml-1">{value}</span>}
+                  />
                   <Tooltip
-                    contentStyle={{
-                      backgroundColor: "#0d0d0d",
-                      borderColor: "#A3E635",
-                      color: "#f5f5f0",
-                      fontFamily: "monospace",
-                      fontSize: "11px",
-                      borderRadius: 0,
-                    }}
+                    contentStyle={{ ...tooltipBoxStyle, borderColor: "#A3E635" }}
+                    itemStyle={tooltipItemStyle}
+                    labelStyle={{ ...tooltipLabelStyle, color: "#A3E635" }}
                   />
                 </RadarChart>
               </ResponsiveContainer>
@@ -1138,22 +1162,20 @@ function ReportView({
                         }
                       />
                       <Tooltip
-                        contentStyle={{
-                          backgroundColor: "#0d0d0d",
-                          borderColor: "#7C3AED",
-                          color: "#f5f5f0",
-                          fontFamily: "monospace",
-                          fontSize: "11px",
-                          borderRadius: 0,
-                        }}
-                        formatter={(val: any) => [
+                        contentStyle={{ ...tooltipBoxStyle, borderColor: "#8B5CF6" }}
+                        itemStyle={tooltipItemStyle}
+                        labelStyle={{ ...tooltipLabelStyle, color: "#A3E635" }}
+                        formatter={(val: any, name: any) => [
                           hasUserRevenue
                             ? `₹${Number(val).toLocaleString("en-IN")}`
                             : `$${Number(val).toLocaleString()}`,
-                          "",
+                          name || "Projected Revenue",
                         ]}
                       />
-                      <Legend wrapperStyle={{ fontFamily: "monospace", fontSize: "10px" }} />
+                      <Legend
+                        wrapperStyle={{ fontFamily: "monospace", fontSize: "11px", paddingTop: "8px" }}
+                        formatter={(value) => <span className="text-ink font-mono font-semibold text-[11px] ml-1">{value}</span>}
+                      />
                       <Area
                         type="monotone"
                         dataKey="optimizedMRR"
@@ -1354,14 +1376,9 @@ function ReportView({
                         <XAxis dataKey="stage" stroke="#666" tick={{ fontFamily: "monospace", fontSize: 9 }} />
                         <YAxis stroke="#666" tick={{ fontFamily: "monospace", fontSize: 10 }} tickFormatter={(v) => `${v}%`} />
                         <Tooltip
-                          contentStyle={{
-                            backgroundColor: "#0d0d0d",
-                            borderColor: "#7C3AED",
-                            color: "#f5f5f0",
-                            fontFamily: "monospace",
-                            fontSize: "11px",
-                            borderRadius: 0,
-                          }}
+                          contentStyle={{ ...tooltipBoxStyle, borderColor: "#7C3AED" }}
+                          itemStyle={tooltipItemStyle}
+                          labelStyle={{ ...tooltipLabelStyle, color: "#A3E635" }}
                           formatter={(val: any) => [`${val}% Efficiency`, "Health Score"]}
                         />
                         <Bar dataKey="efficiency" fill="#7C3AED" radius={0}>
@@ -1526,20 +1543,18 @@ function ReportView({
                       ))}
                     </Pie>
                     <Tooltip
-                      contentStyle={{
-                        backgroundColor: "#0d0d0d",
-                        borderColor: "#A3E635",
-                        color: "#f5f5f0",
-                        fontFamily: "monospace",
-                        fontSize: "11px",
-                        borderRadius: 0,
-                      }}
+                      contentStyle={{ ...tooltipBoxStyle, borderColor: "#10B981", padding: "8px 12px" }}
+                      itemStyle={tooltipItemStyle}
+                      labelStyle={{ ...tooltipLabelStyle, color: "#10B981" }}
                       formatter={(val: any, name: any, item: any) => [
-                        `${item.payload.dealSize} deal size`,
-                        item.payload.name,
+                        `${item.payload.dealSize || "Custom"} deal size`,
+                        item.payload.name || name,
                       ]}
                     />
-                    <Legend wrapperStyle={{ fontFamily: "monospace", fontSize: "10px" }} />
+                    <Legend
+                      wrapperStyle={{ fontFamily: "monospace", fontSize: "11px", paddingTop: "12px" }}
+                      formatter={(value) => <span className="text-ink font-mono font-semibold text-[11px] ml-1">{value}</span>}
+                    />
                   </PieChart>
                 </ResponsiveContainer>
               </div>
