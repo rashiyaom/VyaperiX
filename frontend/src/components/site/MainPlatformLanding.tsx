@@ -235,8 +235,8 @@ export function MainPlatformLanding() {
 
       {/* ── /01 HERO SECTION WITH LIVE HUD RADAR ── */}
       <section className="border-b border-ink/20 overflow-hidden">
-        <div className="mx-auto grid max-w-[1400px] gap-10 px-4 py-12 lg:grid-cols-[1.05fr_1fr] lg:px-8 lg:py-20">
-          <div className="min-w-0 space-y-6">
+        <div className="mx-auto grid max-w-[1400px] gap-8 px-4 py-10 sm:py-12 lg:grid-cols-[1.05fr_1fr] lg:px-8 lg:py-20">
+          <div className="min-w-0 space-y-5 sm:space-y-6">
             <ScrollReveal variant="fade-down" delay={50}>
               <div className="flex items-center gap-2">
                 <span className="label-mono text-violet">/01 Platform</span>
@@ -248,7 +248,7 @@ export function MainPlatformLanding() {
             </ScrollReveal>
 
             <ScrollReveal variant="fade-up" delay={150}>
-              <h1 className="font-display text-[clamp(2.75rem,9vw,6.5rem)] font-extrabold leading-[0.85] tracking-tight text-ink">
+              <h1 className="font-display text-[clamp(2.4rem,9vw,6.5rem)] font-extrabold leading-[0.85] tracking-tight text-ink">
                 AI Sales
                 <br />
                 Engine
@@ -268,17 +268,17 @@ export function MainPlatformLanding() {
 
             {/* CTA Buttons */}
             <ScrollReveal variant="fade-up" delay={350}>
-              <div className="flex flex-wrap items-center gap-4">
+              <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-3">
                 <Link
                   to="/login"
-                  className="group inline-flex items-center gap-3 border border-ink bg-ink px-6 py-4 label-mono text-paper transition-all hover:border-violet hover:bg-violet hover:text-white active:scale-95 shadow-md"
+                  className="group inline-flex items-center justify-center gap-3 border border-ink bg-ink px-6 py-4 label-mono text-paper transition-all hover:border-violet hover:bg-violet hover:text-white active:scale-95 shadow-md text-sm"
                 >
                   Start Free Trial
                   <ArrowUpRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
                 </Link>
                 <a
                   href="#sandbox"
-                  className="inline-flex items-center gap-2 border border-ink/20 bg-card px-4 py-4 label-mono text-ink hover:border-violet hover:text-violet transition-all"
+                  className="inline-flex items-center justify-center gap-2 border border-ink/20 bg-card px-4 py-4 label-mono text-ink hover:border-violet hover:text-violet transition-all text-sm"
                 >
                   <Maximize2 className="h-3.5 w-3.5" /> Interactive Pipeline Sandbox
                 </a>
@@ -313,7 +313,7 @@ export function MainPlatformLanding() {
 
           {/* Right Hero: Mesh Image with Live Telemetry Overlay */}
           <ScrollReveal variant="fade-left" delay={200} className="h-full">
-            <div className="relative min-w-0 h-full border border-ink bg-card flex flex-col justify-between overflow-hidden shadow-2xl">
+            <div className="relative min-w-0 min-h-[220px] sm:min-h-[280px] lg:min-h-0 h-full border border-ink bg-card flex flex-col justify-between overflow-hidden shadow-2xl">
               {/* Top HUD bar */}
               <div className="absolute left-4 top-4 z-10 flex items-center gap-2 border border-ink bg-paper px-3 py-1.5 label-mono shadow">
                 <span className="h-1.5 w-1.5 bg-lime live-dot" />
@@ -334,7 +334,7 @@ export function MainPlatformLanding() {
 
       {/* ── /02 11-STEP AUTONOMOUS PIPELINE ── */}
       <section id="pipeline" className="border-b border-ink/20">
-        <div className="mx-auto max-w-[1400px] px-4 py-16 lg:px-8">
+        <div className="mx-auto max-w-[1400px] px-4 py-12 sm:py-16 lg:px-8">
           <ScrollReveal variant="fade-up">
             <SectionHead index="02" title="11-Step End-to-End Autonomous Pipeline Flow">
               <span className="label-mono text-muted-foreground">
@@ -351,7 +351,7 @@ export function MainPlatformLanding() {
 
       {/* ── /03 INTERACTIVE SANDBOX SIMULATOR ── */}
       <section id="sandbox" className="border-b border-ink/20">
-        <div className="mx-auto max-w-[1400px] px-4 py-16 lg:px-8">
+        <div className="mx-auto max-w-[1400px] px-4 py-12 sm:py-16 lg:px-8">
           <ScrollReveal variant="fade-up">
             <SectionHead index="03" title="Interactive Pipeline Sandbox">
               <span className="label-mono text-muted-foreground">
@@ -368,7 +368,7 @@ export function MainPlatformLanding() {
 
       {/* ── /04 INTERACTIVE PIPELINE & ROI CALCULATOR ── */}
       <section className="border-b border-ink/20 bg-secondary/30">
-        <div className="mx-auto max-w-[1400px] px-4 py-16 lg:px-8">
+        <div className="mx-auto max-w-[1400px] px-4 py-12 sm:py-16 lg:px-8">
           <ScrollReveal variant="fade-up">
             <SectionHead index="04" title="Enterprise ROI & Pipeline Multiplier">
               <span className="label-mono text-muted-foreground">Interactive Capacity Planner</span>
@@ -476,7 +476,7 @@ export function MainPlatformLanding() {
 
       {/* ── /05 MULTILINGUAL VOICE PROTOCOL & LIVE SPEECH SYNTHESIS ── */}
       <section id="voice" className="border-b border-ink/20">
-        <div className="mx-auto max-w-[1400px] px-4 py-16 lg:px-8 space-y-10">
+        <div className="mx-auto max-w-[1400px] px-4 py-12 sm:py-16 lg:px-8 space-y-8 sm:space-y-10">
           <ScrollReveal variant="fade-up">
             <div>
               <SectionHead index="05" title="Multilingual Voice Agent Testing Studio">

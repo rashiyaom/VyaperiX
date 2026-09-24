@@ -430,7 +430,7 @@ function LoginPage() {
       {/* ── Right Auth Form Panel ── */}
       <div className="flex flex-col bg-paper text-ink">
         {/* Top bar */}
-        <div className="flex items-center justify-between border-b border-ink/20 px-6 py-4">
+        <div className="flex items-center justify-between border-b border-ink/20 px-4 sm:px-6 py-3 sm:py-4">
           <Link
             to="/"
             className="inline-flex items-center gap-2 label-mono hover:text-violet transition-colors text-xs text-ink"
@@ -446,7 +446,7 @@ function LoginPage() {
           </div>
         </div>
 
-        <div className="mx-auto w-full max-w-lg flex-1 px-6 py-10 flex flex-col justify-center">
+        <div className="mx-auto w-full max-w-lg flex-1 px-4 sm:px-6 py-8 sm:py-10 flex flex-col justify-center">
           <div className="space-y-1.5">
             <span className="label-mono text-violet font-bold text-xs">// Secure Supabase Authentication</span>
             <h2 className="font-display text-3xl font-extrabold uppercase text-ink">

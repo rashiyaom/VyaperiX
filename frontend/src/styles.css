@@ -416,6 +416,9 @@
     color: var(--color-foreground);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
+    /* Prevent iOS auto-zoom on inputs */
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
   }
 
   h1,
@@ -442,7 +445,49 @@
   textarea {
     color: inherit;
   }
+
+  /* Touch targets — faster tap response */
+  button,
+  a,
+  [role="button"] {
+    touch-action: manipulation;
+  }
 }
+
+/* ─── MOBILE UTILITIES ─── */
+@utility no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Safe-area inset support for notched phones (iPhone X+) */
+@utility safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+@utility safe-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+/* ─── iOS ZOOM PREVENTION on mobile ─── */
+/* iOS auto-zooms inputs with font-size < 16px. Fix only on mobile, not desktop. */
+@media (max-width: 768px) {
+  input[type="text"],
+  input[type="email"],
+  input[type="password"],
+  input[type="number"],
+  input[type="search"],
+  input[type="tel"],
+  input[type="url"],
+  textarea,
+  select {
+    font-size: 16px;
+  }
+}
+
+
 /* ─── PRINT STYLES — Intelligence Suite Executive Report ─── */
 @media print {
   body {
