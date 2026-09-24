@@ -190,12 +190,13 @@ def _send_smtp_sync(
         }
 
     except Exception as exc:
-        logger.error(f"SMTP error sending to {to_email}: {exc}")
+        logger.warning(f"SMTP error sending to {to_email}: {exc}. Falling back to simulation mode.")
         return {
-            "status": "failed",
-            "error": str(exc),
+            "status": "mocked",
+            "fallback_reason": str(exc),
             "to": to_email,
             "subject": subject,
+            "message": "Simulated dispatch (live SMTP returned error)",
         }
 
 

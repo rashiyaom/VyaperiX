@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useAuth } from "@/lib/auth";
+import { getApiBase, getAuthHeaders } from "@/lib/api";
 import {
   Radio,
   Search,
@@ -61,7 +62,7 @@ interface LeadRadarModuleProps {
   onLaunchVoiceAgent?: (lead: Lead) => void;
 }
 
-const API_BASE = (((import.meta.env as Record<string, any>)["VITE_BACKEND_URL"]) || "http://localhost:8000").replace(/\/$/, "");
+const API_BASE = getApiBase();
 
 export function LeadRadarModule({
   analysis,
@@ -248,9 +249,10 @@ export function LeadRadarModule({
     }, 9000);
 
     try {
-      const res = await fetch(`${API_BASE}/api/prospecting/discover`, {
+      const userParam = user?.id ? `?user_id=${encodeURIComponent(user.id)}` : "";
+      const res = await fetch(`${API_BASE}/api/prospecting/discover${userParam}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAuthHeaders(session?.access_token),
         body: JSON.stringify({
           offering: offering.trim(),
           target_industry: targetIndustry.trim(),
@@ -298,7 +300,7 @@ export function LeadRadarModule({
       const phoneToUse = lead.phone || "+919727662885";
       const res = await fetch(`${API_BASE}/api/prospecting/leads/${lead.id}/call`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAuthHeaders(session?.access_token),
         body: JSON.stringify({
           phone_override: phoneToUse,
           business_name: effectiveCompanyName || "VyaperiX",
@@ -339,7 +341,7 @@ export function LeadRadarModule({
       const phoneToUse = lead.phone || "+919727662885";
       const res = await fetch(`${API_BASE}/api/prospecting/leads/${lead.id}/whatsapp`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAuthHeaders(session?.access_token),
         body: JSON.stringify({
           phone_override: phoneToUse,
           business_name: effectiveCompanyName || "VyaperiX",
@@ -385,8 +387,8 @@ export function LeadRadarModule({
     try {
       const res = await fetch(`${API_BASE}/api/crm/sync-lead`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ lead_id: lead.id }),
+        headers: getAuthHeaders(session?.access_token),
+        body: JSON.stringify({ lead_id: lead.id, user_id: user?.id }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -419,7 +421,7 @@ export function LeadRadarModule({
     try {
       const res = await fetch(`${API_BASE}/api/prospecting/enrich-domain`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAuthHeaders(session?.access_token),
         body: JSON.stringify({ domain: quickDomain.trim() }),
       });
       const data = await res.json();

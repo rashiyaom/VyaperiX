@@ -8,6 +8,7 @@ import React, {
   useState,
 } from "react";
 import { useAuth } from "@/lib/auth";
+import { getApiBase, getAuthHeaders } from "@/lib/api";
 
 export interface ChatCitation {
   id: string;
@@ -52,11 +53,6 @@ const ChatContext = createContext<ChatContextValue | null>(null);
 const STORAGE_KEY_OPEN = "vyaperix_chat_widget_open";
 const STORAGE_KEY_MESSAGES = "vyaperix_chat_messages_by_report";
 const STORAGE_KEY_ACTIVE_REPORT = "vyaperix_chat_active_report_meta";
-
-const API_BASE =
-  (import.meta.env["VITE_SCRAPER_API_BASE"] as string) ||
-  (import.meta.env["VITE_API_BASE_URL"] as string) ||
-  "http://localhost:8000";
 
 function safeGetSessionItem<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
@@ -232,11 +228,9 @@ export function ChatWidgetProvider({ children }: { children: React.ReactNode }) 
       abortControllerRef.current = controller;
 
       try {
-        const token = session?.access_token || localStorage.getItem("vyepari_x_auth_token");
-        const headers: Record<string, string> = { "Content-Type": "application/json" };
-        if (token) headers["Authorization"] = `Bearer ${token}`;
+        const headers = getAuthHeaders(session?.access_token, { "Content-Type": "application/json" });
 
-        const response = await fetch(`${API_BASE}/api/reports/${activeReportId}/chat`, {
+        const response = await fetch(`${getApiBase()}/api/reports/${activeReportId}/chat`, {
           method: "POST",
           headers,
           body: JSON.stringify({ question: cleanQuestion }),

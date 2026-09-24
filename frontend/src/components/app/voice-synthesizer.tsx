@@ -401,8 +401,43 @@ let _resumeWatchdog: ReturnType<typeof setInterval> | null = null;
 let _isSpeaking = false;
 const _retainedUtterances: SpeechSynthesisUtterance[] = [];
 
+let _activeAudioElement: HTMLAudioElement | null = null;
+
+function getStaticAudioUrl(agentId: string, text: string): string | null {
+  const t = text || "";
+  if (agentId.startsWith("hi-saanvi")) {
+    if (t.includes("ERP") || t.includes("क्लाउड") || t.includes("माइग्रेशन")) {
+      return "/audio/samples/hi-saanvi-pitch.wav";
+    }
+    return "/audio/samples/hi-saanvi-default.wav";
+  }
+  if (agentId.startsWith("hi-kabir")) {
+    if (t.includes("सलूशन") || t.includes("एक्यूरेसी") || t.includes("कंपटीटर")) {
+      return "/audio/samples/hi-kabir-competitor.wav";
+    }
+    return "/audio/samples/hi-kabir-default.wav";
+  }
+  if (agentId.startsWith("gu-dhruv")) {
+    return "/audio/samples/gu-dhruv-default.wav";
+  }
+  if (agentId.startsWith("gu-pooja")) {
+    return "/audio/samples/gu-pooja-default.wav";
+  }
+  if (agentId.startsWith("en-arjun") || agentId.startsWith("en")) {
+    return "/audio/samples/en-arjun-default.wav";
+  }
+  return null;
+}
+
 export function stopRealVoiceAudio() {
   if (typeof window === "undefined") return;
+  if (_activeAudioElement) {
+    try {
+      _activeAudioElement.pause();
+      _activeAudioElement.currentTime = 0;
+    } catch {}
+    _activeAudioElement = null;
+  }
   if (_safetyTimer) {
     clearTimeout(_safetyTimer);
     _safetyTimer = null;
@@ -437,31 +472,72 @@ export async function playRealVoiceAudio({
   onStart?: () => void;
   onEnd?: () => void;
 }): Promise<void> {
-  if (typeof window === "undefined" || !("speechSynthesis" in window)) {
-    onEnd?.();
-    return;
-  }
-
   stopRealVoiceAudio();
   playTelephonicChime(agent.toneFrequency);
 
-  // Clean delay for audio context
-  await new Promise((r) => setTimeout(r, 80));
+  // 1. Try High-Definition Pre-Rendered Sarvam AI Audio first (0ms latency, zero API cost)
+  const staticSampleUrl = getStaticAudioUrl(agent.id, text);
+  if (staticSampleUrl && typeof Audio !== "undefined") {
+    try {
+      const audio = new Audio(staticSampleUrl);
+      _activeAudioElement = audio;
 
-  const allVoices = await getVoices();
-  const { voice: chosenVoice, isNativeLang } = selectBestVoice(allVoices, agent);
+      let started = false;
+      audio.onplay = () => {
+        started = true;
+        _isSpeaking = true;
+        onStart?.();
+      };
+      audio.onended = () => {
+        _isSpeaking = false;
+        _activeAudioElement = null;
+        onEnd?.();
+      };
+      audio.onerror = () => {
+        // Sample not generated or 404, fallback to Web Speech
+        _activeAudioElement = null;
+        fallbackSpeech();
+      };
 
-  // If we have a native voice for this language, use the native text (Devanagari/Gujarati)
-  // Otherwise, use phonetic Romanized text so English voices speak it with clear pronunciation!
-  let spokenScript = (isNativeLang ? text : phoneticText || agent.phoneticDefaultPhrase || text)
-    .replace(/\[.*?\]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  if (!spokenScript) {
-    onEnd?.();
-    return;
+      const playPromise = audio.play();
+      if (playPromise !== undefined) {
+        await playPromise.catch(() => {
+          _activeAudioElement = null;
+          fallbackSpeech();
+        });
+        return;
+      }
+    } catch {
+      _activeAudioElement = null;
+    }
   }
+
+  // 2. Fallback to Browser Speech Synthesis Engine
+  fallbackSpeech();
+
+  async function fallbackSpeech() {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+      onEnd?.();
+      return;
+    }
+
+    // Clean delay for audio context
+    await new Promise((r) => setTimeout(r, 80));
+
+    const allVoices = await getVoices();
+    const { voice: chosenVoice, isNativeLang } = selectBestVoice(allVoices, agent);
+
+    // If we have a native voice for this language, use the native text (Devanagari/Gujarati)
+    // Otherwise, use phonetic Romanized text so English voices speak it with clear pronunciation!
+    let spokenScript = (isNativeLang ? text : phoneticText || agent.phoneticDefaultPhrase || text)
+      .replace(/\[.*?\]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    if (!spokenScript) {
+      onEnd?.();
+      return;
+    }
 
   try {
     // Split into natural sentences so long text never hits browser buffer limits
@@ -563,6 +639,7 @@ export async function playRealVoiceAudio({
     stopRealVoiceAudio();
     onEnd?.();
   }
+}
 }
 
 /* ─────────────────────────────────────────────

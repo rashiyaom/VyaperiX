@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/lib/auth";
+import { getApiBase, getAuthHeaders as getApiAuthHeaders } from "@/lib/api";
 import {
   Sparkles,
   PhoneCall,
@@ -92,7 +93,7 @@ interface ParsedContact {
   status?: "pending" | "calling" | "completed" | "failed";
 }
 
-const API_BASE = (import.meta.env["VITE_SCRAPER_API_BASE"] as string) || "http://localhost:8000";
+const API_BASE = getApiBase();
 
 export function VoiceFleetModule({
   analysis,
@@ -115,11 +116,7 @@ export function VoiceFleetModule({
     : undefined;
 
   const getAuthHeaders = () => {
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (session?.access_token) {
-      headers["Authorization"] = `Bearer ${session.access_token}`;
-    }
-    return headers;
+    return getApiAuthHeaders(session?.access_token);
   };
 
   // Tab State: "logs" | "csv" | "live" | "inbound" | "settings"
@@ -392,7 +389,7 @@ export function VoiceFleetModule({
 
       if (callsRes.ok) {
         const callsData = await callsRes.json();
-        setCalls(callsData);
+        setCalls(Array.isArray(callsData) ? callsData : []);
       }
       if (statsRes.ok) {
         const statsData = await statsRes.json();

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/lib/auth";
+import { getApiBase, getAuthHeaders as getApiAuthHeaders } from "@/lib/api";
 import {
   Video,
   Play,
@@ -88,7 +89,7 @@ export interface VideoMeetingModuleProps {
   onNavigateToIntelligence?: () => void;
 }
 
-const API_BASE = (import.meta.env["VITE_SCRAPER_API_BASE"] as string) || "http://localhost:8000";
+const API_BASE = getApiBase();
 
 export function VideoMeetingModule({
   analysis,
@@ -136,12 +137,7 @@ export function VideoMeetingModule({
 
   // Auth Header helper
   const getAuthHeaders = () => {
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    const token = session?.access_token || (typeof window !== "undefined" ? localStorage.getItem("vyepari_x_auth_token") : null);
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
-    }
-    return headers;
+    return getApiAuthHeaders(session?.access_token);
   };
 
   // Combine reports from props or fallback query
@@ -191,7 +187,7 @@ export function VideoMeetingModule({
       });
       if (res.ok) {
         const data = await res.json();
-        setMeetings(data);
+        setMeetings(Array.isArray(data) ? data : []);
       }
     } catch {
       // Ignored

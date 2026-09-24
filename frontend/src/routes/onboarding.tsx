@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   ArrowUpRight,
   ArrowLeft,
@@ -124,10 +124,9 @@ function OptionCard({
   );
 }
 
-/* ─── Main Component ─── */
 function OnboardingPage() {
   const navigate = useNavigate();
-  const { user, profile, completeOnboarding, updateProfile } = useAuth();
+  const { user, profile, completeOnboarding, updateProfile, loading } = useAuth();
   const [step, setStep] = useState(0); // 0-3
   const [source, setSource] = useState("");
   const [company, setCompany] = useState(profile?.company_name || user?.user_metadata?.["company_name"] || "");
@@ -137,6 +136,23 @@ function OnboardingPage() {
   const [animDir, setAnimDir] = useState<"forward" | "back">("forward");
 
   const TOTAL_STEPS = 4;
+
+  useEffect(() => {
+    if (!loading && !user) {
+      navigate({ to: "/login" });
+    }
+  }, [loading, user, navigate]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-paper flex flex-col items-center justify-center p-6 space-y-4">
+        <div className="w-10 h-10 border-2 border-violet border-t-transparent rounded-full animate-spin" />
+        <p className="font-mono text-xs text-muted-foreground uppercase tracking-wider">
+          Initializing Onboarding...
+        </p>
+      </div>
+    );
+  }
 
   const goNext = () => {
     setAnimDir("forward");

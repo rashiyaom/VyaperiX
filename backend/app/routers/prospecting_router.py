@@ -50,6 +50,7 @@ class EnrichDomainRequest(BaseModel):
 @router.post("/discover")
 async def discover_prospects(
     payload: DiscoverRequest,
+    user_id: Optional[str] = Query(None),
     authorization: Optional[str] = Header(None),
 ):
     """
@@ -57,12 +58,12 @@ async def discover_prospects(
     Uses DuckDuckGo to run LinkedIn X-Ray queries, enriches company profiles with Apollo.io,
     and calculates ICP match scores and custom opening hooks via Groq LLM.
     """
-    user_id = None
-    if authorization:
+    resolved_user_id = user_id
+    if (not resolved_user_id or str(resolved_user_id).lower() in ("undefined", "null", "")) and authorization:
         try:
             user = await auth_middleware.get_current_user(authorization)
             if user:
-                user_id = user.id
+                resolved_user_id = user.id
         except Exception:
             pass
 
@@ -73,7 +74,7 @@ async def discover_prospects(
             region=payload.region or "India",
             custom_query=payload.custom_query,
             max_results=payload.max_results or 6,
-            user_id=user_id,
+            user_id=resolved_user_id,
         )
         return {
             "success": True,
@@ -89,22 +90,23 @@ async def discover_prospects(
 
 @router.get("/leads")
 async def list_prospect_leads(
+    user_id: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=100),
     authorization: Optional[str] = Header(None),
 ):
     """
     List all previously discovered and enriched prospect leads.
     """
-    user_id = None
-    if authorization:
+    resolved_user_id = user_id
+    if (not resolved_user_id or str(resolved_user_id).lower() in ("undefined", "null", "")) and authorization:
         try:
             user = await auth_middleware.get_current_user(authorization)
             if user:
-                user_id = user.id
+                resolved_user_id = user.id
         except Exception:
             pass
 
-    leads = await db.list_prospect_leads(user_id=user_id, limit=limit)
+    leads = await db.list_prospect_leads(user_id=resolved_user_id, limit=limit)
     return {"leads": leads, "count": len(leads)}
 
 

@@ -1,5 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useAuth } from "@/lib/auth";
+import { getApiBase, getAuthHeaders } from "@/lib/api";
 import { useState, useEffect, useRef } from "react";
 import {
   Brain,
@@ -108,11 +109,10 @@ export const Route = createFileRoute("/dashboard")({
 const API_BASE = (import.meta.env["VITE_SCRAPER_API_BASE"] as string) || "http://127.0.0.1:8000";
 
 async function safeApiFetch(endpoint: string, init?: RequestInit): Promise<Response> {
-  const primary = endpoint.startsWith("http") ? endpoint : `${API_BASE}${endpoint.startsWith("/") ? "" : "/"}${endpoint}`;
-  console.log("[safeApiFetch] Trying:", primary);
+  const base = getApiBase();
+  const primary = endpoint.startsWith("http") ? endpoint : `${base}${endpoint.startsWith("/") ? "" : "/"}${endpoint}`;
   try {
     const res = await fetch(primary, init);
-    console.log("[safeApiFetch] Success from:", primary, res.status);
     return res;
   } catch (err: any) {
     console.warn("[safeApiFetch] Failed for:", primary, err);
@@ -120,10 +120,8 @@ async function safeApiFetch(endpoint: string, init?: RequestInit): Promise<Respo
     const is127 = primary.includes("127.0.0.1:8000");
     if (isLocalhost || is127) {
       const fallbackUrl = isLocalhost ? primary.replace("localhost:8000", "127.0.0.1:8000") : primary.replace("127.0.0.1:8000", "localhost:8000");
-      console.log("[safeApiFetch] Trying fallback:", fallbackUrl);
       try {
         const res = await fetch(fallbackUrl, init);
-        console.log("[safeApiFetch] Fallback success from:", fallbackUrl, res.status);
         return res;
       } catch (fallbackErr) {
         console.error("[safeApiFetch] Fallback also failed:", fallbackErr);
@@ -525,6 +523,7 @@ function ReportView({
   onReportFinished?: (report: ReportData) => void;
 }) {
   const { open: openChat, setActiveReportId } = useChatWidget();
+  const { session } = useAuth();
   const [report, setReport] = useState<ReportData | null>(null);
   const [copied, setCopied] = useState(false);
   const [completedSteps, setCompletedSteps] = useState<Record<string, boolean>>({});
@@ -551,7 +550,8 @@ function ReportView({
     let notFoundRetries = 0;
     const fetch_ = async () => {
       try {
-        const res = await safeApiFetch(`/api/reports/${reportId}`);
+        const headers = getAuthHeaders(session?.access_token);
+        const res = await safeApiFetch(`/api/reports/${reportId}`, { headers });
         if (res.ok && isSubscribed) {
           notFoundRetries = 0;
           const data: ReportData = await res.json();
@@ -1948,7 +1948,7 @@ function MobileBottomNav({
 /* ─── MAIN DASHBOARD ─── */
 function DashboardPage() {
   const navigate = useNavigate();
-  const { user, profile, session, signOut } = useAuth();
+  const { user, profile, session, signOut, loading: authLoading } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const [activeNav, setActiveNav] = useState(() => {
@@ -2152,6 +2152,27 @@ function DashboardPage() {
     // overview is always unlocked; others unlock after first completed report
     isUnlocked: mod.id === "overview" || mod.id === "intelligence" || hasCompletedReport,
   }));
+
+  useEffect(() => {
+    if (!authLoading && !user && !session) {
+      navigate({ to: "/login" });
+    }
+  }, [authLoading, user, session, navigate]);
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-paper flex flex-col items-center justify-center p-6 space-y-4">
+        <div className="w-10 h-10 border-2 border-violet border-t-transparent rounded-full animate-spin" />
+        <p className="font-mono text-xs text-muted-foreground uppercase tracking-wider">
+          Initializing Command Session...
+        </p>
+      </div>
+    );
+  }
+
+  if (!user && !session) {
+    return null;
+  }
 
   return (
     <div className="min-h-screen bg-paper text-ink flex flex-col selection:bg-lime selection:text-ink">

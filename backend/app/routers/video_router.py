@@ -199,6 +199,7 @@ async def start_video_meeting(
     # Build Tavus v2 create conversation request payload (persona_id and pal_id are aliases; Tavus requires exactly one)
     tavus_payload: Dict[str, Any] = {
         "persona_id": tavus_pal_id,
+        "pal_id": tavus_pal_id,
         "conversational_context": briefing["conversational_context"],
         "custom_greeting": briefing["custom_greeting"],
     }

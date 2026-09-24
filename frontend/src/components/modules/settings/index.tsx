@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useAuth } from "@/lib/auth";
+import { getApiBase, getAuthHeaders } from "@/lib/api";
 import {
   Settings,
   Database,
@@ -25,7 +26,6 @@ interface SettingsModuleProps {
 }
 
 export function SettingsModule({ companyName = "Target Enterprise" }: SettingsModuleProps) {
-  const API_BASE = (import.meta.env["VITE_SCRAPER_API_BASE"] as string) || "http://localhost:8000";
   const { session } = useAuth();
   const [voiceModel, setVoiceModel] = useState("aura-conversational-v2");
   const [autoEnrich, setAutoEnrich] = useState(true);
@@ -53,11 +53,8 @@ export function SettingsModule({ companyName = "Target Enterprise" }: SettingsMo
   useEffect(() => {
     const loadSettings = async () => {
       try {
-        const headers: Record<string, string> = {};
-        if (session?.access_token) {
-          headers["Authorization"] = `Bearer ${session.access_token}`;
-        }
-        const res = await fetch(`${API_BASE}/api/voice/config`, { headers });
+        const headers = getAuthHeaders(session?.access_token);
+        const res = await fetch(`${getApiBase()}/api/voice/config`, { headers });
         if (res.ok) {
           const data = await res.json();
           if (data.sms_alerts_enabled !== undefined) {
@@ -69,7 +66,7 @@ export function SettingsModule({ companyName = "Target Enterprise" }: SettingsMo
         }
 
         // Fetch Email status & registered user email
-        const emailRes = await fetch(`${API_BASE}/api/email/status`, { headers });
+        const emailRes = await fetch(`${getApiBase()}/api/email/status`, { headers });
         if (emailRes.ok) {
           const emailData = await emailRes.json();
           setEmailStatus(emailData);
@@ -84,11 +81,8 @@ export function SettingsModule({ companyName = "Target Enterprise" }: SettingsMo
   const handleSave = async () => {
     setSaving(true);
     try {
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (session?.access_token) {
-        headers["Authorization"] = `Bearer ${session.access_token}`;
-      }
-      await fetch(`${API_BASE}/api/voice/config`, {
+      const headers = getAuthHeaders(session?.access_token, { "Content-Type": "application/json" });
+      await fetch(`${getApiBase()}/api/voice/config`, {
         method: "POST",
         headers,
         body: JSON.stringify({
@@ -109,11 +103,8 @@ export function SettingsModule({ companyName = "Target Enterprise" }: SettingsMo
     try {
       setSendingGreeting(true);
       setEmailActionMsg(null);
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (session?.access_token) {
-        headers["Authorization"] = `Bearer ${session.access_token}`;
-      }
-      const res = await fetch(`${API_BASE}/api/email/send-greeting`, {
+      const headers = getAuthHeaders(session?.access_token, { "Content-Type": "application/json" });
+      const res = await fetch(`${getApiBase()}/api/email/send-greeting`, {
         method: "POST",
         headers,
         body: JSON.stringify({}),
@@ -136,11 +127,8 @@ export function SettingsModule({ companyName = "Target Enterprise" }: SettingsMo
     try {
       setSendingTestEmail(true);
       setEmailActionMsg(null);
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (session?.access_token) {
-        headers["Authorization"] = `Bearer ${session.access_token}`;
-      }
-      const res = await fetch(`${API_BASE}/api/email/test`, {
+      const headers = getAuthHeaders(session?.access_token, { "Content-Type": "application/json" });
+      const res = await fetch(`${getApiBase()}/api/email/test`, {
         method: "POST",
         headers,
         body: JSON.stringify({}),

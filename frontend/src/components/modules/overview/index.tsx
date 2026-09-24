@@ -6,6 +6,7 @@
 
 import React, { useEffect, useState, useCallback } from "react";
 import { useAuth } from "@/lib/auth";
+import { getApiBase, getAuthHeaders } from "@/lib/api";
 import {
   Activity,
   Brain,
@@ -50,7 +51,7 @@ import {
   PolarAngleAxis,
 } from "recharts";
 
-const API_BASE = (import.meta.env["VITE_SCRAPER_API_BASE"] as string) || "http://127.0.0.1:8000";
+const API_BASE = getApiBase();
 
 async function apiFetch(path: string, headers: Record<string, string> = {}): Promise<any> {
   const primary = `${API_BASE}${path}`;
@@ -196,11 +197,7 @@ export function OverviewDashboard({ onNavigate }: { onNavigate?: (mod: string) =
       return;
     }
     setLoading(true);
-    const headers: Record<string, string> = {};
-    const token = session?.access_token || (typeof window !== "undefined" ? localStorage.getItem("vyepari_x_auth_token") : null);
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
-    }
+    const headers = getAuthHeaders(session?.access_token);
     const uidParam = `user_id=${encodeURIComponent(validUserId)}`;
     const [rpts, ldData, cls, evData, crmSt, crmRec] = await Promise.all([
       apiFetch(`/api/reports?${uidParam}`, headers),

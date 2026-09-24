@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
+import { getApiBase, getAuthHeaders } from "@/lib/api";
 import {
   Calendar as CalendarIcon,
   Clock,
@@ -69,7 +70,7 @@ export interface CalendarModuleProps {
   companyName?: string;
 }
 
-const API_BASE = (((import.meta.env as Record<string, any>)["VITE_BACKEND_URL"]) || "http://localhost:8000").replace(/\/$/, "");
+const API_BASE = getApiBase();
 
 const DAYS_OF_WEEK = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTH_NAMES = [
@@ -110,14 +111,12 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
   const fetchEvents = async () => {
     try {
       setLoading(true);
-      const headers: Record<string, string> = {};
-      if (session?.access_token) {
-        headers["Authorization"] = `Bearer ${session.access_token}`;
-      }
-      const res = await fetch(`${API_BASE}/api/calendar/events?limit=200`, { headers });
+      const headers = getAuthHeaders(session?.access_token);
+      const userParam = user?.id ? `&user_id=${encodeURIComponent(user.id)}` : "";
+      const res = await fetch(`${API_BASE}/api/calendar/events?limit=200${userParam}`, { headers });
       if (res.ok) {
         const data = await res.json();
-        setEvents(data.events || []);
+        setEvents(Array.isArray(data.events) ? data.events : []);
       }
     } catch (e) {
       console.error("Failed to load calendar events:", e);
@@ -128,7 +127,7 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
 
   useEffect(() => {
     fetchEvents();
-  }, [user]);
+  }, [user?.id]);
 
   // Temporary success banner
   const triggerSuccess = (msg: string) => {
@@ -281,6 +280,7 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
         customer_email: formCustomerEmail.trim() || undefined,
         customer_phone: formCustomerPhone.trim() || undefined,
         company_name: companyName || undefined,
+        user_id: user?.id || undefined,
         title: formTitle.trim(),
         description: formDescription.trim(),
         start_time: startDateTime.toISOString(),
@@ -291,14 +291,9 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
         send_customer_confirmation: formSendConfirmation,
       };
 
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (session?.access_token) {
-        headers["Authorization"] = `Bearer ${session.access_token}`;
-      }
-
       const res = await fetch(`${API_BASE}/api/calendar/events`, {
         method: "POST",
-        headers,
+        headers: getAuthHeaders(session?.access_token),
         body: JSON.stringify(payload),
       });
 

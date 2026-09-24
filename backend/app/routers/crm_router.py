@@ -42,6 +42,7 @@ class CRMSettingsPayload(BaseModel):
 
 class SyncLeadRequest(BaseModel):
     lead_id: Optional[str] = Field(None, description="Database ID of the prospect lead")
+    user_id: Optional[str] = Field(None, description="Owner user ID")
     company: Optional[str] = Field(None, description="Company name")
     name: Optional[str] = Field(None, description="Contact person or team name")
     email: Optional[str] = Field(None, description="Contact email")
@@ -53,6 +54,7 @@ class SyncLeadRequest(BaseModel):
 
 class SyncMeetingRequest(BaseModel):
     event_id: Optional[str] = Field(None, description="Calendar event UUID")
+    user_id: Optional[str] = Field(None, description="Owner user ID")
     meeting_id: Optional[str] = None
     customer_name: Optional[str] = None
     contact_name: Optional[str] = None
@@ -68,21 +70,24 @@ class SyncMeetingRequest(BaseModel):
 
 
 @router.get("/status")
-async def get_crm_status(authorization: Optional[str] = Header(None)):
+async def get_crm_status(
+    user_id: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+):
     """
     Returns active CRM integration status, credentials state, and pipeline summary.
     """
-    user_id = None
-    if authorization:
+    resolved_user_id = user_id
+    if (not resolved_user_id or str(resolved_user_id).lower() in ("undefined", "null", "")) and authorization:
         try:
             user = await auth_middleware.get_current_user(authorization)
             if user:
-                user_id = user.id
+                resolved_user_id = user.id
         except Exception:
             pass
 
-    settings = await db.get_crm_settings(user_id=user_id)
-    records = await db.list_crm_records(user_id=user_id, limit=200)
+    settings = await db.get_crm_settings(user_id=resolved_user_id)
+    records = await db.list_crm_records(user_id=resolved_user_id, limit=200)
 
     token = settings.get("access_token") or ""
     has_token = bool(token.strip())
@@ -129,17 +134,18 @@ async def get_crm_status(authorization: Optional[str] = Header(None)):
 @router.post("/settings")
 async def update_crm_settings(
     payload: CRMSettingsPayload,
+    user_id: Optional[str] = Query(None),
     authorization: Optional[str] = Header(None),
 ):
     """
     Save or update CRM configuration in MongoDB.
     """
-    user_id = None
-    if authorization:
+    resolved_user_id = user_id
+    if (not resolved_user_id or str(resolved_user_id).lower() in ("undefined", "null", "")) and authorization:
         try:
             user = await auth_middleware.get_current_user(authorization)
             if user:
-                user_id = user.id
+                resolved_user_id = user.id
         except Exception:
             pass
 
@@ -148,7 +154,7 @@ async def update_crm_settings(
     auto_radar = payload.auto_sync if payload.auto_sync is not None else payload.auto_sync_radar
     auto_meet = payload.auto_sync if payload.auto_sync is not None else payload.auto_sync_meetings
 
-    existing = await db.get_crm_settings(user_id=user_id)
+    existing = await db.get_crm_settings(user_id=resolved_user_id)
     updated = {
         **existing,
         "provider": provider_in,
@@ -159,7 +165,7 @@ async def update_crm_settings(
         "auto_sync_calls": payload.auto_sync_calls if payload.auto_sync_calls is not None else existing.get("auto_sync_calls", True),
     }
 
-    saved = await db.save_crm_settings(updated, user_id=user_id)
+    saved = await db.save_crm_settings(updated, user_id=resolved_user_id)
     return {"success": True, "settings": saved}
 
 
@@ -201,14 +207,15 @@ async def sync_lead_to_crm(
     """
     Syncs an individual lead from Lead Radar to HubSpot CRM and/or Universal Webhook.
     """
-    user_id = None
-    if authorization:
+    resolved_user_id = payload.user_id
+    if (not resolved_user_id or str(resolved_user_id).lower() in ("undefined", "null", "")) and authorization:
         try:
             user = await auth_middleware.get_current_user(authorization)
             if user:
-                user_id = user.id
+                resolved_user_id = user.id
         except Exception:
             pass
+    user_id = resolved_user_id
 
     # Load lead from MongoDB if lead_id provided
     lead_dict: Dict[str, Any] = {}
@@ -307,20 +314,23 @@ async def sync_lead_to_crm(
 
 
 @router.post("/sync-all-leads")
-async def sync_all_leads_batch(authorization: Optional[str] = Header(None)):
+async def sync_all_leads_batch(
+    user_id: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+):
     """
     Sync all discovered prospect leads in MongoDB to CRM in batch.
     """
-    user_id = None
-    if authorization:
+    resolved_user_id = user_id
+    if (not resolved_user_id or str(resolved_user_id).lower() in ("undefined", "null", "")) and authorization:
         try:
             user = await auth_middleware.get_current_user(authorization)
             if user:
-                user_id = user.id
+                resolved_user_id = user.id
         except Exception:
             pass
 
-    leads = await db.list_prospect_leads(user_id=user_id, limit=50)
+    leads = await db.list_prospect_leads(user_id=resolved_user_id, limit=50)
     synced_records = []
 
     for l in leads:
@@ -431,40 +441,44 @@ async def sync_meeting_to_crm(
 
 @router.get("/records")
 async def list_crm_records(
+    user_id: Optional[str] = Query(None),
     limit: int = Query(100, ge=1, le=200),
     authorization: Optional[str] = Header(None),
 ):
     """
     List all synced CRM records from MongoDB.
     """
-    user_id = None
-    if authorization:
+    resolved_user_id = user_id
+    if (not resolved_user_id or str(resolved_user_id).lower() in ("undefined", "null", "")) and authorization:
         try:
             user = await auth_middleware.get_current_user(authorization)
             if user:
-                user_id = user.id
+                resolved_user_id = user.id
         except Exception:
             pass
 
-    records = await db.list_crm_records(user_id=user_id, limit=limit)
+    records = await db.list_crm_records(user_id=resolved_user_id, limit=limit)
     return {"records": records, "count": len(records)}
 
 
 @router.get("/export-csv")
-async def export_crm_csv(authorization: Optional[str] = Header(None)):
+async def export_crm_csv(
+    user_id: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+):
     """
     Export all synced CRM records as a downloadable CSV.
     """
-    user_id = None
-    if authorization:
+    resolved_user_id = user_id
+    if (not resolved_user_id or str(resolved_user_id).lower() in ("undefined", "null", "")) and authorization:
         try:
             user = await auth_middleware.get_current_user(authorization)
             if user:
-                user_id = user.id
+                resolved_user_id = user.id
         except Exception:
             pass
 
-    records = await db.list_crm_records(user_id=user_id, limit=500)
+    records = await db.list_crm_records(user_id=resolved_user_id, limit=500)
 
     output = io.StringIO()
     writer = csv.writer(output)

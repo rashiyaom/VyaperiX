@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from "react";
+import { useAuth } from "@/lib/auth";
+import { getApiBase, getAuthHeaders } from "@/lib/api";
 import {
   Share2,
   CheckCircle2,
@@ -73,9 +75,10 @@ interface CRMRecord {
   updated_at?: string;
 }
 
-const API_BASE = (((import.meta.env as Record<string, any>)["VITE_SCRAPER_API_BASE"]) || "http://localhost:8000").replace(/\/$/, "");
+const API_BASE = getApiBase();
 
 export function CRMModule({ companyName = "VyaperiX" }: CRMModuleProps) {
+  const { user, session } = useAuth();
   const [status, setStatus] = useState<CRMStatus | null>(null);
   const [records, setRecords] = useState<CRMRecord[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -112,9 +115,12 @@ export function CRMModule({ companyName = "VyaperiX" }: CRMModuleProps) {
   const loadData = async () => {
     try {
       setRefreshing(true);
+      const headers = getAuthHeaders(session?.access_token);
+      const userParam = user?.id ? `?user_id=${encodeURIComponent(user.id)}` : "";
+      const recUserParam = user?.id ? `&user_id=${encodeURIComponent(user.id)}` : "";
       const [statusRes, recordsRes] = await Promise.all([
-        fetch(`${API_BASE}/api/crm/status`),
-        fetch(`${API_BASE}/api/crm/records?limit=100`),
+        fetch(`${API_BASE}/api/crm/status${userParam}`, { headers }),
+        fetch(`${API_BASE}/api/crm/records?limit=100${recUserParam}`, { headers }),
       ]);
 
       if (statusRes.ok) {
@@ -127,7 +133,7 @@ export function CRMModule({ companyName = "VyaperiX" }: CRMModuleProps) {
 
       if (recordsRes.ok) {
         const rData = await recordsRes.json();
-        setRecords(rData.records || []);
+        setRecords(Array.isArray(rData.records) ? rData.records : []);
       }
     } catch (e) {
       console.error("Failed to load CRM data:", e);
@@ -139,7 +145,7 @@ export function CRMModule({ companyName = "VyaperiX" }: CRMModuleProps) {
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [user?.id]);
 
   // Save Settings
   const handleSaveSettings = async (e: React.FormEvent) => {
@@ -147,9 +153,11 @@ export function CRMModule({ companyName = "VyaperiX" }: CRMModuleProps) {
     setSavingSettings(true);
     setSettingsSuccess(null);
     try {
-      const res = await fetch(`${API_BASE}/api/crm/settings`, {
+      const headers = getAuthHeaders(session?.access_token);
+      const userParam = user?.id ? `?user_id=${encodeURIComponent(user.id)}` : "";
+      const res = await fetch(`${API_BASE}/api/crm/settings${userParam}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({
           crm_type: "hubspot",
           api_key: apiKeyInput.trim() || undefined,
@@ -180,9 +188,13 @@ export function CRMModule({ companyName = "VyaperiX" }: CRMModuleProps) {
     setTestingConnection(true);
     setTestResult(null);
     try {
+      const headers = getAuthHeaders(session?.access_token);
       const res = await fetch(`${API_BASE}/api/crm/test-connection`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
+        body: JSON.stringify({
+          access_token: apiKeyInput.trim() || undefined,
+        }),
       });
       const data = await res.json();
       setTestResult(data);
@@ -202,9 +214,11 @@ export function CRMModule({ companyName = "VyaperiX" }: CRMModuleProps) {
     setSyncSuccessMsg(null);
     setSyncErrorMsg(null);
     try {
-      const res = await fetch(`${API_BASE}/api/crm/sync-all-leads`, {
+      const headers = getAuthHeaders(session?.access_token);
+      const userParam = user?.id ? `?user_id=${encodeURIComponent(user.id)}` : "";
+      const res = await fetch(`${API_BASE}/api/crm/sync-all-leads${userParam}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
       });
       const data = await res.json();
       if (!res.ok) {
@@ -223,7 +237,8 @@ export function CRMModule({ companyName = "VyaperiX" }: CRMModuleProps) {
 
   // Export CSV
   const handleExportCSV = () => {
-    window.open(`${API_BASE}/api/crm/export-csv`, "_blank");
+    const userParam = user?.id ? `?user_id=${encodeURIComponent(user.id)}` : "";
+    window.open(`${API_BASE}/api/crm/export-csv${userParam}`, "_blank");
   };
 
   // Filter records
