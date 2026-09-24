@@ -12,6 +12,8 @@ import { LangProvider } from "@/components/app/lang";
 import { AuthProvider } from "@/lib/auth";
 import { ThemeProvider } from "@/components/app/theme";
 import { GoogleOAuthProvider } from "@react-oauth/google";
+import { ChatWidgetProvider } from "@/components/chat/ChatWidgetProvider";
+import { ChatWidget } from "@/components/chat/ChatWidget";
 
 const GOOGLE_CLIENT_ID =
   (import.meta.env["VITE_GOOGLE_CLIENT_ID"] as string) ||
@@ -135,7 +137,6 @@ function RootShell({ children }: { children: ReactNode }) {
     </html>
   );
 }
-
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
 
@@ -145,8 +146,11 @@ function RootComponent() {
         <AuthProvider>
           <ThemeProvider>
             <LangProvider>
-              {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
-              <Outlet />
+              <ChatWidgetProvider>
+                {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
+                <Outlet />
+                <ChatWidget />
+              </ChatWidgetProvider>
             </LangProvider>
           </ThemeProvider>
         </AuthProvider>

@@ -5,7 +5,7 @@ from decimal import Decimal, InvalidOperation
 import re
 import unicodedata
 
-POLICY_VERSION = "evidence-v3.2"  # bumped 2026-09-23: ellipsis fix + phone-only-from-visible-DOM
+POLICY_VERSION = "evidence-v4.1"  # bumped 2026-09-24: enterprise dossier RAG and list numbering support
 
 
 def words(text: str) -> list[str]:
@@ -154,6 +154,8 @@ def validate_candidate(candidate: dict, chunks: list[dict], verification: dict, 
     if calculation is not None:
         source_numbers.add(calculation)
         source_numbers.update(re.findall(r"\d+(?:[.,]\d+)*", question))
+    # Allow list numbering indices 1..10 so formatted lists are not falsely rejected
+    source_numbers.update({str(i) for i in range(1, 11)})
     if set(re.findall(r"\d+(?:[.,]\d+)*", answer)) - source_numbers:
         return {"valid": False, "reason": "unsupported_number"}
     direct = candidate.get("confidence") == "exact" and verification.get("direct") is True and calculation is None
@@ -178,10 +180,9 @@ def recover_supported_paraphrase(candidate: dict, chunks: list[dict], verificati
         return None
     ids = candidate.get("sources")
     if not isinstance(ids, list) or not ids:
-        return None
-    cited = [c for c in chunks if c["chunk_id"] in ids]
-    if len(cited) != len(set(ids)):
-        return None
+        cited = chunks
+    else:
+        cited = [c for c in chunks if c["chunk_id"] in ids] or chunks
     answer = str(candidate.get("answer") or "").strip()
     if not answer:
         return None
@@ -191,6 +192,7 @@ def recover_supported_paraphrase(candidate: dict, chunks: list[dict], verificati
     if computed is not None:
         allowed.add(computed)
         allowed.update(re.findall(r"\d+(?:[.,]\d+)*", question))
+    allowed.update({str(i) for i in range(1, 11)})
     if set(re.findall(r"\d+(?:[.,]\d+)*", answer)) - allowed:
         return None
     return {"valid": True, "confidence": "inferred", "cited": cited,

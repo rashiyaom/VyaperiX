@@ -66,7 +66,7 @@ import {
 } from "recharts";
 import { Logo } from "@/components/site/Chrome";
 import { FileUploadZone } from "@/components/scraper/FileUploadZone";
-import { ReportChat } from "@/components/scraper/ReportChat";
+import { useChatWidget } from "@/components/chat/ChatWidgetProvider";
 import {
   DocumentInsightPanel,
   DiscrepancyAlerts,
@@ -523,16 +523,26 @@ function ReportView({
   onNavigateModule?: (moduleId: string) => void;
   onReportFinished?: (report: ReportData) => void;
 }) {
+  const { open: openChat, setActiveReportId } = useChatWidget();
   const [report, setReport] = useState<ReportData | null>(null);
   const [copied, setCopied] = useState(false);
   const [completedSteps, setCompletedSteps] = useState<Record<string, boolean>>({});
   const [activeBifurcation, setActiveBifurcation] = useState<
-    "overview" | "financial" | "pipeline" | "timeline" | "icp" | "audit" | "chat" | "all"
+    "overview" | "financial" | "pipeline" | "timeline" | "icp" | "audit" | "all"
   >("overview");
   const [userMonthlyRevenue, setUserMonthlyRevenue] = useState<string>("");
   const [userDealCycle, setUserDealCycle] = useState<string>("");
   const [appliedCustomBaseline, setAppliedCustomBaseline] = useState<boolean>(false);
   const finishedNotifiedRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (reportId) {
+      setActiveReportId(reportId, report?.analysis?.company_name || null);
+    }
+    return () => {
+      setActiveReportId(null);
+    };
+  }, [reportId, report?.analysis?.company_name, setActiveReportId]);
 
   useEffect(() => {
     let iv: ReturnType<typeof setInterval>;
@@ -897,6 +907,12 @@ function ReportView({
         </button>
         <div className="flex items-center gap-2">
           <button
+            onClick={openChat}
+            className="flex items-center gap-1.5 border border-violet bg-violet/10 text-violet px-3 py-1.5 label-mono font-bold hover:bg-violet hover:text-violet-foreground transition-all"
+          >
+            <MessageCircle className="w-3.5 h-3.5" /> Ask This Report
+          </button>
+          <button
             onClick={handleCopy}
             className="flex items-center gap-1.5 border border-ink/25 bg-card px-3 py-1.5 label-mono hover:border-violet hover:text-violet transition-all"
           >
@@ -979,7 +995,6 @@ function ReportView({
             { id: "timeline", label: "04. Execution Timeline", icon: Clock, badge: `${analysis.timeline_roadmap?.length || 4} Phases` },
             { id: "icp", label: "05. ICP & Market Matrix", icon: Users, badge: `${customers.length} ICPs` },
             { id: "audit", label: "06. Document Audit", icon: FileText, badge: `${analysis.document_insights?.length || 0} Docs` },
-            { id: "chat", label: "07. Ask This Report", icon: MessageCircle },
             { id: "all", label: "View All Sections", icon: FileCheck2 },
           ].map((tab) => {
             const isAct = activeBifurcation === tab.id;
@@ -1773,7 +1788,6 @@ function ReportView({
           ) : null}
         </div>
       )}
-      {activeBifurcation === "chat" && <ReportChat key={report.id} reportId={report.id} />}
     </div>
   );
 }
