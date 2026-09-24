@@ -265,6 +265,27 @@ async def get_profile_by_email(email: str) -> Optional[dict]:
             return p
     return None
 
+async def get_workspace_owner_profile() -> Optional[dict]:
+    """Fetch the workspace owner profile from MongoDB with memory fallback."""
+    try:
+        db = get_mongo_db()
+        # Find explicit owner
+        doc = await db["profiles"].find_one({"role": "owner"})
+        if not doc:
+            # Fallback to first profile registered
+            doc = await db["profiles"].find_one({})
+        if doc:
+            return _clean_doc(doc)
+    except Exception as e:
+        logger.warning(f"MongoDB get_workspace_owner_profile error: {e}")
+
+    for p in _in_memory_profiles.values():
+        if p.get("role") == "owner":
+            return p
+    if _in_memory_profiles:
+        return next(iter(_in_memory_profiles.values()))
+    return None
+
 async def upsert_profile(user_id: str, profile_data: dict) -> dict:
     """Insert or update user profile and onboarding data in MongoDB."""
     clean_uid = _clean_user_id(user_id) or str(uuid.uuid4())
@@ -483,16 +504,12 @@ async def get_report(report_id: str) -> Optional[dict]:
     return None
 
 async def list_reports(user_id: Optional[str] = None, limit: int = 50) -> List[dict]:
-    """List recent intelligence reports from MongoDB with in-memory fallback."""
+    """List recent intelligence reports from MongoDB with in-memory fallback strictly isolated per user."""
     clean_uid = _clean_user_id(user_id)
-    if clean_uid:
-        query = {
-            "$or": [
-                {"user_id": clean_uid},
-                {"user_id": None},
-                {"user_id": {"$regex": "^user-"}},
-            ]
-        }
+    if not clean_uid:
+        return []
+
+    query = {"user_id": clean_uid}
 
     try:
         db = get_mongo_db()
@@ -511,7 +528,7 @@ async def list_reports(user_id: Optional[str] = None, limit: int = 50) -> List[d
 
         for mid, mrep in _in_memory_reports.items():
             if mid not in seen_ids:
-                if not clean_uid or mrep.get("user_id") in (clean_uid, None):
+                if mrep.get("user_id") == clean_uid:
                     rep_copy = dict(mrep)
                     rep_copy, _ = _ensure_visual_intelligence(rep_copy)
                     enriched_list.insert(0, rep_copy)
@@ -519,7 +536,7 @@ async def list_reports(user_id: Optional[str] = None, limit: int = 50) -> List[d
         return enriched_list[:limit]
     except Exception as e:
         logger.warning(f"MongoDB list_reports error: {e}")
-        return list(_in_memory_reports.values())[:limit]
+        return [r for r in _in_memory_reports.values() if r.get("user_id") == clean_uid][:limit]
 
 # ─────────────────────────── Voice Fleet Operations (MongoDB) ────────────
 
@@ -617,11 +634,12 @@ async def list_voice_calls(
     campaign_id: Optional[str] = None,
     limit: int = 100,
 ) -> List[dict]:
-    """List recent voice calls with optional filtering from MongoDB."""
+    """List recent voice calls with optional filtering from MongoDB strictly isolated per user."""
     clean_uid = _clean_user_id(user_id)
-    query: Dict[str, Any] = {}
-    if clean_uid:
-        query["$or"] = [{"user_id": clean_uid}, {"user_id": None}]
+    if not clean_uid:
+        return []
+
+    query: Dict[str, Any] = {"user_id": clean_uid}
     if direction and direction != "all":
         query["direction"] = direction
     if status and status != "all":
@@ -636,9 +654,7 @@ async def list_voice_calls(
         return [_clean_doc(d) for d in docs]
     except Exception as e:
         logger.warning(f"MongoDB list_voice_calls error: {e}")
-        calls = list(_in_memory_calls.values())
-        if clean_uid:
-            calls = [c for c in calls if c.get("user_id") in (clean_uid, None)]
+        calls = [c for c in _in_memory_calls.values() if c.get("user_id") == clean_uid]
         if direction and direction != "all":
             calls = [c for c in calls if c.get("direction") == direction]
         if status and status != "all":
@@ -852,11 +868,12 @@ async def list_video_calls(
     user_id: Optional[str] = None,
     limit: int = 100,
 ) -> List[dict]:
-    """List recent video calls for a user from MongoDB with memory fallback."""
+    """List recent video calls for a user from MongoDB with memory fallback strictly isolated per user."""
     clean_uid = _clean_user_id(user_id)
-    query: Dict[str, Any] = {}
-    if clean_uid:
-        query["$or"] = [{"user_id": clean_uid}, {"user_id": None}]
+    if not clean_uid:
+        return []
+
+    query: Dict[str, Any] = {"user_id": clean_uid}
 
     try:
         db = get_mongo_db()
@@ -865,9 +882,7 @@ async def list_video_calls(
         return [_clean_doc(d) for d in docs]
     except Exception as e:
         logger.warning(f"MongoDB list_video_calls error: {e}")
-        calls = list(_in_memory_video_calls.values())
-        if clean_uid:
-            calls = [c for c in calls if c.get("user_id") in (clean_uid, None)]
+        calls = [c for c in _in_memory_video_calls.values() if c.get("user_id") == clean_uid]
         return calls[:limit]
 
 async def get_video_call_by_tavus_id(tavus_conversation_id: str) -> Optional[dict]:
@@ -949,11 +964,12 @@ async def list_calendar_events(
     customer_name: Optional[str] = None,
     limit: int = 100,
 ) -> List[dict]:
-    """List calendar events from MongoDB filtered by user, status, date bounds, or customer name."""
+    """List calendar events from MongoDB filtered by user, status, date bounds, or customer name strictly isolated per user."""
     clean_uid = _clean_user_id(user_id)
+
     query: Dict[str, Any] = {}
     if clean_uid:
-        query["$or"] = [{"user_id": clean_uid}, {"user_id": None}]
+        query["user_id"] = clean_uid
     if status and status != "all":
         query["status"] = status
     if start_date:
@@ -973,9 +989,7 @@ async def list_calendar_events(
         return [_clean_doc(d) for d in docs]
     except Exception as e:
         logger.warning(f"MongoDB list_calendar_events error: {e}")
-        events = list(_in_memory_calendar_events.values())
-        if clean_uid:
-            events = [e for e in events if e.get("user_id") in (clean_uid, None)]
+        events = [e for e in _in_memory_calendar_events.values() if not clean_uid or e.get("user_id") == clean_uid]
         if status and status != "all":
             events = [e for e in events if e.get("status") == status]
         if customer_name:
@@ -1069,12 +1083,13 @@ async def get_prospect_lead(lead_id: str) -> Optional[dict]:
 
 
 async def list_prospect_leads(user_id: Optional[str] = None, limit: int = 50) -> List[dict]:
-    """List prospect leads ordered by updated_at descending."""
+    """List prospect leads ordered by updated_at descending strictly isolated per user."""
     clean_uid = _clean_user_id(user_id)
+    if not clean_uid:
+        return []
+
+    query: Dict[str, Any] = {"user_id": clean_uid}
     if _mongo_connected:
-        query: Dict[str, Any] = {}
-        if clean_uid:
-            query["$or"] = [{"user_id": clean_uid}, {"user_id": None}]
         try:
             db = get_mongo_db()
             cursor = db["prospect_leads"].find(query).sort("updated_at", -1).limit(limit)
@@ -1083,9 +1098,7 @@ async def list_prospect_leads(user_id: Optional[str] = None, limit: int = 50) ->
         except Exception as e:
             logger.warning(f"MongoDB list_prospect_leads error: {e}")
 
-    leads = list(_in_memory_prospect_leads.values())
-    if clean_uid:
-        leads = [l for l in leads if l.get("user_id") in (clean_uid, None)]
+    leads = [l for l in _in_memory_prospect_leads.values() if l.get("user_id") == clean_uid]
     leads.sort(key=lambda x: x.get("updated_at", ""), reverse=True)
     return leads[:limit]
 
@@ -1195,12 +1208,13 @@ async def save_crm_record(record: dict, user_id: Optional[str] = None) -> str:
 
 
 async def list_crm_records(user_id: Optional[str] = None, limit: int = 100) -> List[dict]:
-    """List synced CRM records ordered by synced_at descending."""
+    """List synced CRM records ordered by synced_at descending strictly isolated per user."""
     clean_uid = _clean_user_id(user_id)
+    if not clean_uid:
+        return []
+
+    query: Dict[str, Any] = {"user_id": clean_uid}
     if _mongo_connected:
-        query: Dict[str, Any] = {}
-        if clean_uid:
-            query["$or"] = [{"user_id": clean_uid}, {"user_id": None}]
         try:
             db = get_mongo_db()
             cursor = db["crm_records"].find(query).sort("synced_at", -1).limit(limit)
@@ -1209,9 +1223,7 @@ async def list_crm_records(user_id: Optional[str] = None, limit: int = 100) -> L
         except Exception as e:
             logger.warning(f"MongoDB list_crm_records error: {e}")
 
-    records = list(_in_memory_crm_records.values())
-    if clean_uid:
-        records = [r for r in records if r.get("user_id") in (clean_uid, None)]
+    records = [r for r in _in_memory_crm_records.values() if r.get("user_id") == clean_uid]
     records.sort(key=lambda x: x.get("synced_at", ""), reverse=True)
     return records[:limit]
 

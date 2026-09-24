@@ -294,6 +294,8 @@ export function VoiceFleetModule({
     public_webhook_url: "",
     voice_provider: "sarvam",
     voice_id: "priya",
+    sms_alerts_enabled: true,
+    alert_phone_number: "",
   });
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsSavedMessage, setSettingsSavedMessage] = useState(false);
@@ -466,6 +468,8 @@ export function VoiceFleetModule({
           public_webhook_url: data.public_webhook_url || "",
           voice_provider: data.voice_provider || "sarvam",
           voice_id: data.voice_id || "priya",
+          sms_alerts_enabled: data.sms_alerts_enabled !== undefined ? Boolean(data.sms_alerts_enabled) : true,
+          alert_phone_number: data.alert_phone_number || "",
         }));
       }
     } catch (err) {
@@ -2456,6 +2460,43 @@ export function VoiceFleetModule({
                 </div>
               </div>
             )}
+
+            {/* SMS Meeting Alerts Configuration */}
+            <div className="border border-ink/20 bg-secondary/10 p-4 space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <label htmlFor="voiceSmsAlerts" className="text-ink font-bold text-xs cursor-pointer flex items-center gap-1.5">
+                    <MessageSquare className="w-3.5 h-3.5 text-lime-700 dark:text-lime" /> Enable SMS Meeting Alerts
+                  </label>
+                  <p className="text-muted-foreground text-[11px] font-mono">
+                    Receive instant SMS notifications whenever a new meeting is scheduled or extracted from an AI call.
+                  </p>
+                </div>
+                <input
+                  type="checkbox"
+                  id="voiceSmsAlerts"
+                  checked={settings.sms_alerts_enabled}
+                  onChange={(e) => setSettings({ ...settings, sms_alerts_enabled: e.target.checked })}
+                  className="cursor-pointer accent-violet w-4 h-4"
+                />
+              </div>
+
+              <div className="space-y-1.5 pt-2 border-t border-ink/10 font-mono text-xs">
+                <label className="label-mono text-muted-foreground flex items-center gap-1.5">
+                  Alert Phone Number (fallback)
+                </label>
+                <input
+                  type="text"
+                  placeholder="+919876543210"
+                  value={settings.alert_phone_number}
+                  onChange={(e) => setSettings({ ...settings, alert_phone_number: e.target.value })}
+                  className="w-full border border-ink/30 bg-paper px-3 py-2 text-ink focus:outline-none focus:border-violet"
+                />
+                <span className="text-[10px] text-muted-foreground block font-mono">
+                  Fallback phone number to receive SMS alerts if user profile phone is not set.
+                </span>
+              </div>
+            </div>
 
             <div className="pt-2 flex items-center justify-between">
               <button

@@ -67,7 +67,7 @@ import {
 } from "recharts";
 import { Logo } from "@/components/site/Chrome";
 import { FileUploadZone } from "@/components/scraper/FileUploadZone";
-import { ReportChat } from "@/components/scraper/ReportChat";
+import { useChatWidget } from "@/components/chat/ChatWidgetProvider";
 import {
   DocumentInsightPanel,
   DiscrepancyAlerts,
@@ -524,16 +524,26 @@ function ReportView({
   onNavigateModule?: (moduleId: string) => void;
   onReportFinished?: (report: ReportData) => void;
 }) {
+  const { open: openChat, setActiveReportId } = useChatWidget();
   const [report, setReport] = useState<ReportData | null>(null);
   const [copied, setCopied] = useState(false);
   const [completedSteps, setCompletedSteps] = useState<Record<string, boolean>>({});
   const [activeBifurcation, setActiveBifurcation] = useState<
-    "overview" | "financial" | "pipeline" | "timeline" | "icp" | "audit" | "chat" | "all"
+    "overview" | "financial" | "pipeline" | "timeline" | "icp" | "audit" | "all"
   >("overview");
   const [userMonthlyRevenue, setUserMonthlyRevenue] = useState<string>("");
   const [userDealCycle, setUserDealCycle] = useState<string>("");
   const [appliedCustomBaseline, setAppliedCustomBaseline] = useState<boolean>(false);
   const finishedNotifiedRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (reportId) {
+      setActiveReportId(reportId, report?.analysis?.company_name || null);
+    }
+    return () => {
+      setActiveReportId(null);
+    };
+  }, [reportId, report?.analysis?.company_name, setActiveReportId]);
 
   useEffect(() => {
     let iv: ReturnType<typeof setInterval>;
@@ -898,6 +908,12 @@ function ReportView({
         </button>
         <div className="flex items-center gap-2">
           <button
+            onClick={openChat}
+            className="flex items-center gap-1.5 border border-violet bg-violet/10 text-violet px-3 py-1.5 label-mono font-bold hover:bg-violet hover:text-violet-foreground transition-all"
+          >
+            <MessageCircle className="w-3.5 h-3.5" /> Ask This Report
+          </button>
+          <button
             onClick={handleCopy}
             className="flex items-center gap-1.5 border border-ink/25 bg-card px-3 py-1.5 label-mono hover:border-violet hover:text-violet transition-all"
           >
@@ -975,12 +991,11 @@ function ReportView({
         <div className="flex items-center gap-1 overflow-x-auto no-scrollbar py-1 px-0.5">
           {[
             { id: "overview", label: "01. Overview & Radar", shortLabel: "Overview", icon: Swords, badge: "6 Vectors" },
-            { id: "financial", label: "02. Financial & Revenue", shortLabel: "Finance", icon: TrendingUp, badge: revenueChartData.length > 0 ? `${revenueChartData.length} Periods` : "Option A/B" },
-            { id: "pipeline", label: "03. Pipeline & Flask", shortLabel: "Pipeline", icon: Layers, badge: funnelChartData.length > 0 ? `${funnelChartData.length} Stages` : "Upload" },
+            { id: "financial", label: "02. Financial & Revenue", shortLabel: "Finance", icon: TrendingUp, badge: revenueChartData.length > 0 ? `${revenueChartData.length} Periods` : "Option A / B" },
+            { id: "pipeline", label: "03. Pipeline & Flask", shortLabel: "Pipeline", icon: Layers, badge: funnelChartData.length > 0 ? `${funnelChartData.length} Stages` : "Upload CRM" },
             { id: "timeline", label: "04. Execution Timeline", shortLabel: "Timeline", icon: Clock, badge: `${analysis.timeline_roadmap?.length || 4} Phases` },
             { id: "icp", label: "05. ICP & Market Matrix", shortLabel: "ICP", icon: Users, badge: `${customers.length} ICPs` },
             { id: "audit", label: "06. Document Audit", shortLabel: "Audit", icon: FileText, badge: `${analysis.document_insights?.length || 0} Docs` },
-            { id: "chat", label: "07. Ask This Report", shortLabel: "Chat", icon: MessageCircle },
             { id: "all", label: "View All Sections", shortLabel: "All", icon: FileCheck2 },
           ].map((tab) => {
             const isAct = activeBifurcation === tab.id;
@@ -1776,7 +1791,6 @@ function ReportView({
           ) : null}
         </div>
       )}
-      {activeBifurcation === "chat" && <ReportChat key={report.id} reportId={report.id} />}
     </div>
   );
 }
@@ -1974,14 +1988,7 @@ function DashboardPage() {
     }
     return "intake";
   });
-  const [recentReports, setRecentReports] = useState<RecentReport[]>(() => {
-    // Seed from session cache so data is always present on refresh — no flash
-    try {
-      const cached = sessionStorage.getItem("vyaperi_reports_cache");
-      if (cached) return JSON.parse(cached) as RecentReport[];
-    } catch {}
-    return [];
-  });
+  const [recentReports, setRecentReports] = useState<RecentReport[]>([]);
   const [activeAnalysis, setActiveAnalysis] = useState<FullAnalysis | null>(null);
   const [activeCompanyInfo, setActiveCompanyInfo] = useState<{ name: string; industry: string; score: number }>({
     name: "",
@@ -2018,16 +2025,49 @@ function DashboardPage() {
         }
       }
     } catch {}
+
+    // Clean legacy global cache
+    try {
+      sessionStorage.removeItem("vyaperi_reports_cache");
+    } catch {}
+
     // Only fetch when we have a settled user ID — avoids double-fire during auth hydration
     if (userId && userId !== "undefined" && userId !== "null") {
+      try {
+        const userCached = sessionStorage.getItem(`vyaperi_reports_cache_${userId}`);
+        if (userCached) {
+          const parsed = JSON.parse(userCached) as RecentReport[];
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setRecentReports(parsed);
+            const latestDone = parsed.find((r) => r.status === "done" && r.analysis?.company_name);
+            if (latestDone) {
+              setActiveCompanyInfo({
+                name: latestDone.analysis!.company_name!,
+                industry: latestDone.analysis!.industry || "B2B Tech",
+                score: latestDone.analysis!.opportunity_score || 88,
+              });
+              setActiveAnalysis(latestDone.analysis as FullAnalysis);
+            }
+          }
+        }
+      } catch {}
       fetchRecents();
+    } else {
+      setRecentReports([]);
+      setActiveAnalysis(null);
+      setActiveCompanyInfo({ name: "", industry: "", score: 0 });
     }
   }, [userId, profile]);
 
   const fetchRecents = async () => {
     try {
       const validUserId = user?.id && user.id !== "undefined" && user.id !== "null" ? user.id : null;
-      const url = validUserId ? `${API_BASE}/api/reports?user_id=${encodeURIComponent(validUserId)}` : `${API_BASE}/api/reports`;
+      if (!validUserId) {
+        setRecentReports([]);
+        setActiveAnalysis(null);
+        return;
+      }
+      const url = `${API_BASE}/api/reports?user_id=${encodeURIComponent(validUserId)}`;
       const headers: Record<string, string> = {};
       if (session?.access_token) {
         headers["Authorization"] = `Bearer ${session.access_token}`;
@@ -2035,10 +2075,13 @@ function DashboardPage() {
       const res = await safeApiFetch(url, { headers });
       if (res.ok) {
         const data = await res.json();
-        // Update state and persist to session cache — prevents flash on next refresh
-        setRecentReports(data);
-        try { sessionStorage.setItem("vyaperi_reports_cache", JSON.stringify(data)); } catch {}
-        const latestDone = data.find((r: any) => r.status === "done" && r.analysis?.company_name);
+        const safeData = Array.isArray(data) ? data : [];
+        setRecentReports(safeData);
+        try {
+          sessionStorage.setItem(`vyaperi_reports_cache_${validUserId}`, JSON.stringify(safeData));
+          sessionStorage.removeItem("vyaperi_reports_cache");
+        } catch {}
+        const latestDone = safeData.find((r: any) => r.status === "done" && r.analysis?.company_name);
         if (latestDone) {
           setActiveCompanyInfo({
             name: latestDone.analysis.company_name,
@@ -2046,6 +2089,8 @@ function DashboardPage() {
             score: latestDone.analysis.opportunity_score || 88,
           });
           setActiveAnalysis(latestDone.analysis);
+        } else {
+          setActiveAnalysis(null);
         }
       }
     } catch {}

@@ -5,6 +5,7 @@
  */
 
 import React, { useEffect, useState, useCallback } from "react";
+import { useAuth } from "@/lib/auth";
 import {
   Activity,
   Brain,
@@ -51,10 +52,10 @@ import {
 
 const API_BASE = (import.meta.env["VITE_SCRAPER_API_BASE"] as string) || "http://127.0.0.1:8000";
 
-async function apiFetch(path: string): Promise<any> {
+async function apiFetch(path: string, headers: Record<string, string> = {}): Promise<any> {
   const primary = `${API_BASE}${path}`;
   try {
-    const r = await fetch(primary);
+    const r = await fetch(primary, { headers });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     return await r.json();
   } catch {
@@ -62,7 +63,7 @@ async function apiFetch(path: string): Promise<any> {
       const fallback = primary.includes("localhost")
         ? primary.replace("localhost", "127.0.0.1")
         : primary.replace("127.0.0.1", "localhost");
-      const r = await fetch(fallback);
+      const r = await fetch(fallback, { headers });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       return await r.json();
     } catch {
@@ -172,6 +173,7 @@ const tooltipLabelStyle: React.CSSProperties = {
 
 /* ─── Main Component ─── */
 export function OverviewDashboard({ onNavigate }: { onNavigate?: (mod: string) => void }) {
+  const { user, session } = useAuth();
   const [reports, setReports] = useState<any[]>([]);
   const [leads, setLeads] = useState<any[]>([]);
   const [calls, setCalls] = useState<any[]>([]);
@@ -183,14 +185,30 @@ export function OverviewDashboard({ onNavigate }: { onNavigate?: (mod: string) =
   const [tick, setTick] = useState(0);
 
   const fetchAll = useCallback(async () => {
+    const validUserId = user?.id && user.id !== "undefined" && user.id !== "null" ? user.id : null;
+    if (!validUserId) {
+      setReports([]);
+      setLeads([]);
+      setCalls([]);
+      setEvents([]);
+      setCrmRecords([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
+    const headers: Record<string, string> = {};
+    const token = session?.access_token || (typeof window !== "undefined" ? localStorage.getItem("vyepari_x_auth_token") : null);
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+    const uidParam = `user_id=${encodeURIComponent(validUserId)}`;
     const [rpts, ldData, cls, evData, crmSt, crmRec] = await Promise.all([
-      apiFetch("/api/reports"),
-      apiFetch("/api/prospecting/leads?limit=100"),
-      apiFetch("/api/calls"),
-      apiFetch("/api/calendar/events?limit=100"),
-      apiFetch("/api/crm/status"),
-      apiFetch("/api/crm/records?limit=100"),
+      apiFetch(`/api/reports?${uidParam}`, headers),
+      apiFetch(`/api/prospecting/leads?limit=100&${uidParam}`, headers),
+      apiFetch(`/api/voice/calls?limit=100&${uidParam}`, headers),
+      apiFetch(`/api/calendar/events?limit=100&${uidParam}`, headers),
+      apiFetch(`/api/crm/status?${uidParam}`, headers),
+      apiFetch(`/api/crm/records?limit=100&${uidParam}`, headers),
     ]);
     if (rpts) setReports(Array.isArray(rpts) ? rpts : []);
     if (ldData?.leads) setLeads(ldData.leads);
@@ -200,7 +218,7 @@ export function OverviewDashboard({ onNavigate }: { onNavigate?: (mod: string) =
     if (crmRec?.records) setCrmRecords(crmRec.records);
     setLastRefresh(new Date());
     setLoading(false);
-  }, []);
+  }, [user?.id, session?.access_token]);
 
   /* Initial fetch + 30-sec auto-refresh */
   useEffect(() => {
