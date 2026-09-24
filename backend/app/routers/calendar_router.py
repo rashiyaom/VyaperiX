@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 from app.core import auth_middleware
 from app.core import database as db
 from app.services import calendar_service
+from app.services import sms_service
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,7 @@ class CreateCalendarEventRequest(BaseModel):
     user_id: Optional[str] = None
     sync_to_google: Optional[bool] = False
     google_access_token: Optional[str] = None
+    send_customer_confirmation: Optional[bool] = False
 
 
 class UpdateCalendarEventRequest(BaseModel):
@@ -57,6 +59,50 @@ class UpdateCalendarEventRequest(BaseModel):
     reminder_minutes: Optional[int] = None
     remind_via: Optional[str] = None
     meet_url: Optional[str] = None
+
+
+async def _resolve_rep_phone(user_id: Optional[str]) -> str:
+    """
+    Resolve representative's phone number for notifications.
+    Hierarchy: profile.phone -> profile.settings.alert_phone_number -> voice_settings.alert_phone_number -> "0000000000"
+    """
+    if user_id:
+        profile = await db.get_profile(user_id)
+        if profile and profile.get("phone"):
+            return str(profile.get("phone")).strip()
+        elif profile and isinstance(profile.get("settings"), dict) and profile["settings"].get("alert_phone_number"):
+            return str(profile["settings"]["alert_phone_number"]).strip()
+
+    settings_doc = await db.get_voice_settings()
+    if settings_doc and settings_doc.get("alert_phone_number"):
+        return str(settings_doc.get("alert_phone_number")).strip()
+
+    return "0000000000"
+
+
+async def _sms_alerts_enabled(user_id: Optional[str]) -> bool:
+    """
+    Check if SMS meeting alerts are enabled.
+    Hierarchy: profile.settings.sms_alerts_enabled -> voice_settings.sms_alerts_enabled -> True (default).
+    """
+    if user_id:
+        profile = await db.get_profile(user_id)
+        if profile and isinstance(profile.get("settings"), dict) and "sms_alerts_enabled" in profile["settings"]:
+            val = profile["settings"]["sms_alerts_enabled"]
+            if isinstance(val, bool):
+                return val
+            if isinstance(val, str):
+                return val.lower() not in ("false", "0", "no", "off")
+
+    settings_doc = await db.get_voice_settings()
+    if settings_doc and "sms_alerts_enabled" in settings_doc:
+        val = settings_doc["sms_alerts_enabled"]
+        if isinstance(val, bool):
+            return val
+        if isinstance(val, str):
+            return val.lower() not in ("false", "0", "no", "off")
+
+    return True
 
 
 # ─────────────────────────── Endpoints ──────────────────────────────────
@@ -149,6 +195,32 @@ async def create_event(
 
     event_id = await db.create_calendar_event(event_data, user_id=resolved_user_id)
     event_data["id"] = event_id
+
+    # SMS notification right after save succeeds
+    try:
+        if not await _sms_alerts_enabled(resolved_user_id):
+            logger.info(f"SMS alerts disabled for user {resolved_user_id}, skipping")
+        else:
+            rep_phone = await _resolve_rep_phone(resolved_user_id)
+
+            meeting_time_str = str(payload.start_time)
+            try:
+                dt = datetime.fromisoformat(meeting_time_str.replace("Z", "+00:00"))
+                formatted_time = dt.strftime("%Y-%m-%d %H:%M")
+            except Exception:
+                formatted_time = meeting_time_str
+
+            sms_service.send_meeting_sms(
+                rep_phone=rep_phone,
+                prospect_phone=payload.customer_phone if payload.customer_phone else None,
+                lead_name=payload.customer_name,
+                meeting_time=formatted_time,
+                meeting_link=event_data.get("meet_url") or "",
+                send_to_prospect=bool(payload.send_customer_confirmation),
+            )
+    except Exception as sms_err:
+        logger.warning(f"SMS notification failed after event creation: {sms_err}")
+
     return {"message": "Meeting scheduled successfully", "event": event_data}
 
 
@@ -222,7 +294,7 @@ async def extract_and_book_from_call(call_id: str):
     Manually trigger AI meeting extraction from an existing completed voice call transcript.
     If meeting agreement was found, auto-books the meeting into the calendar.
     """
-    call = await db.get_call(call_id)
+    call = await db.get_voice_call(call_id)
     if not call:
         raise HTTPException(status_code=404, detail="Voice call not found")
 
@@ -241,6 +313,25 @@ async def extract_and_book_from_call(call_id: str):
 
     if not event:
         return {"message": "No scheduled meeting or follow-up agreement detected in this transcript", "event": None}
+
+    # SMS notification for AI call meeting extraction
+    try:
+        call_user_id = call.get("user_id")
+        if not await _sms_alerts_enabled(call_user_id):
+            logger.info(f"SMS alerts disabled for user {call_user_id}, skipping")
+        else:
+            rep_phone = await _resolve_rep_phone(call_user_id)
+            sms_service.send_meeting_sms(
+                rep_phone=rep_phone,
+                prospect_phone=event.get("customer_phone"),
+                lead_name=event.get("customer_name") or "Lead",
+                meeting_time=event.get("start_time") or "",
+                meeting_link=event.get("meet_url") or "",
+                send_to_prospect=bool(event.get("customer_phone")),
+                source="ai_call",
+            )
+    except Exception as sms_err:
+        logger.warning(f"SMS notification failed after AI meeting extraction for call {call_id}: {sms_err}")
 
     return {"message": "Meeting successfully extracted and booked", "event": event}
 
