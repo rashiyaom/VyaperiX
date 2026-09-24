@@ -152,6 +152,56 @@ const PROTOCOL_TRANSCRIPTS: Record<
       ["PROSPECT", "हाँ, चलेगा। ईमेल पर इनवाइट भेज दीजिए।"],
     ],
   },
+  gu: {
+    title: "Gujarati Voice Protocol — Bharat Patel (Patel Textiles)",
+    agent: "Dhruv",
+    lead: "Bharat Patel",
+    outcome: "INTERESTED · Live Demo Confirmed Wed 10:00 IST",
+    lines: [
+      [
+        "AGENT",
+        "નમસ્તે Bharat ભાઈ, હું Vyaperi X થી ધ્રુવ વાત કરું છું. આપના ગોડાઉન ઇન્વેન્ટરી અને GST બિલિંગ ઓટોમેશન અંગે વાત કરવી હતી — શું આપ 2 મિનિટ ફાળવી શકશો?",
+      ],
+      [
+        "PROSPECT",
+        "હા, ચોક્કસ. અમે હાલમાં 4 વેરહાઉસ માટે નવું Cloud ERP સિસ્ટમ શોધી રહ્યા છીએ.",
+      ],
+      [
+        "AGENT",
+        "સરસ! અમારું પ્લેટફોર્મ મલ્ટિ-વેરહાઉસ રિયલ-ટાઇમ સ્ટોક ટ્રેકિંગ અને ઇ-વે બિલ ઓટોમેશન સપોર્ટ કરે છે. શું આપ બુધવારે સવારે 10 વાગ્યે 15 મિનિટનો લાઇવ ડેમો જોવા માંગો છો?",
+      ],
+      ["PROSPECT", "હા, એ સમય અનુકૂળ રહેશે. મને વોટ્સએપ અને ઈમેલ પર મીટિંગ લિંક મોકલી આપો."],
+      [
+        "AGENT",
+        "ચોક્કસ Bharat ભાઈ, કેલેન્ડર ઇનવાઇટ અને ડેમો વિગતો આપના રજિસ્ટર્ડ ઇમેઇલ પર મોકલી દીધી છે. આભાર!",
+      ],
+    ],
+  },
+  en: {
+    title: "Global Enterprise Protocol — Daniel Wright (Orbit Retail)",
+    agent: "Arjun",
+    lead: "Daniel Wright",
+    outcome: "QUALIFIED · Discovery Briefing Fri 14:00 GMT",
+    lines: [
+      [
+        "AGENT",
+        "Hi Daniel, Arjun here from VyaperiX. I noticed Orbit Retail recently posted an RFP for enterprise headless commerce migration — is that initiative currently active for Q4?",
+      ],
+      [
+        "PROSPECT",
+        "Yes, hi Arjun. We've got executive sign-off and we're vetting architectures that can handle high holiday concurrency.",
+      ],
+      [
+        "AGENT",
+        "Makes sense. We specialize in zero-downtime microservices with autonomous failover. Would it make sense to connect with our Lead Enterprise Architect this Friday at 2 PM GMT?",
+      ],
+      ["PROSPECT", "That works well. Please send over the calendar invite and our procurement deck."],
+      [
+        "AGENT",
+        "Done. The invite and architectural whitepaper are in your inbox. Looking forward to speaking Friday, Daniel!",
+      ],
+    ],
+  },
 };
 
 const LIVE_DISCOVERY_FEED = [
@@ -204,7 +254,7 @@ const STACK = [
 
 export function MainPlatformLanding() {
   const [activeLang, setActiveLang] = useState<"hi" | "gu" | "en">("hi");
-  const protocol = PROTOCOL_TRANSCRIPTS[activeLang]!;
+  const protocol = PROTOCOL_TRANSCRIPTS[activeLang] || PROTOCOL_TRANSCRIPTS["hi"]!;
 
   // Interactive ROI Calculator State
   const [teamSize, setTeamSize] = useState(5);

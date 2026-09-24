@@ -926,35 +926,15 @@ export function VoiceAgentSynthesizerWidget({
         </div>
       </div>
 
-      {/* Custom Input */}
-      <div className="space-y-2 pt-2 border-t border-border">
-        <div className="flex items-center justify-between">
-          <label className="label-mono text-[10px] text-muted-foreground flex items-center gap-1.5">
-            <Mic className="h-3 w-3 text-violet" /> Type Any Custom Script to Speak:
-          </label>
-          <button
-            onClick={() => setCustomText(selectedAgent.defaultPhrase)}
-            className="font-mono text-[10px] text-violet hover:underline flex items-center gap-1"
-          >
-            <RefreshCw className="h-2.5 w-2.5" /> Reset
-          </button>
-        </div>
-        <div className="flex gap-2">
-          <textarea
-            rows={2}
-            value={customText}
-            onChange={(e) => setCustomText(e.target.value)}
-            className="flex-1 border border-border bg-paper p-3 font-mono text-xs text-ink outline-none focus:border-violet focus:ring-1 focus:ring-violet rounded transition-all resize-none"
-            placeholder="Type anything in Hindi, Gujarati, or English..."
-          />
-          <button
-            onClick={() => handleSpeak()}
-            className="px-5 border border-neutral-800 bg-neutral-950 text-neutral-100 font-mono text-xs font-bold rounded hover:bg-violet hover:border-violet transition-all active:scale-95 flex flex-col items-center justify-center gap-1 shrink-0 shadow"
-          >
-            <Volume2 className="h-4 w-4 text-lime" />
-            <span>Speak</span>
-          </button>
-        </div>
+      {/* High-Fidelity Studio Audio Banner */}
+      <div className="pt-3 border-t border-border flex items-center justify-between flex-wrap gap-2 text-muted-foreground font-mono text-[10px]">
+        <span className="flex items-center gap-1.5 text-ink font-semibold">
+          <Volume2 className="h-3.5 w-3.5 text-lime-700 dark:text-lime" />
+          Native Indic Neural Voice Synthesis · Studio Audio Fidelity
+        </span>
+        <span className="label-mono px-2 py-0.5 border border-lime/30 bg-lime/10 text-lime-700 dark:text-lime font-bold text-[9px]">
+          CURATED DEMO SAMPLES
+        </span>
       </div>
     </div>
   );
