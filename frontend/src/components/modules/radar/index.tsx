@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { useAuth } from "@/lib/auth";
 import {
   Radio,
   Search,
@@ -68,6 +69,7 @@ export function LeadRadarModule({
   industry = "",
   onLaunchVoiceAgent,
 }: LeadRadarModuleProps) {
+  const { user, session } = useAuth();
   // Discovery Form State
   const effectiveCompanyName = analysis?.company_name || companyName || "VyaperiX";
   const effectiveIndustry = analysis?.industry || industry || "Commercial B2B";
@@ -115,7 +117,16 @@ export function LeadRadarModule({
   const fetchPersistedLeads = async () => {
     try {
       setIsLoadingExisting(true);
-      const res = await fetch(`${API_BASE}/api/prospecting/leads?limit=50`);
+      const validUserId = user?.id && user.id !== "undefined" && user.id !== "null" ? user.id : null;
+      if (!validUserId) {
+        setLeads([]);
+        setIsLoadingExisting(false);
+        return;
+      }
+      const headers: Record<string, string> = {};
+      const token = session?.access_token || (typeof window !== "undefined" ? localStorage.getItem("vyepari_x_auth_token") : null);
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const res = await fetch(`${API_BASE}/api/prospecting/leads?limit=50&user_id=${encodeURIComponent(validUserId)}`, { headers });
       if (res.ok) {
         const data = await res.json();
         if (data.leads && Array.isArray(data.leads) && data.leads.length > 0) {
@@ -193,7 +204,12 @@ export function LeadRadarModule({
   // Fetch synced CRM records from backend
   const fetchSyncedCrmRecords = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/crm/records?limit=100`);
+      const validUserId = user?.id && user.id !== "undefined" && user.id !== "null" ? user.id : null;
+      if (!validUserId) return;
+      const headers: Record<string, string> = {};
+      const token = session?.access_token || (typeof window !== "undefined" ? localStorage.getItem("vyepari_x_auth_token") : null);
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const res = await fetch(`${API_BASE}/api/crm/records?limit=100&user_id=${encodeURIComponent(validUserId)}`, { headers });
       if (res.ok) {
         const data = await res.json();
         const map: Record<string, { deal_id?: string; contact_id?: string }> = {};
@@ -212,7 +228,7 @@ export function LeadRadarModule({
   useEffect(() => {
     fetchPersistedLeads();
     fetchSyncedCrmRecords();
-  }, [analysis]);
+  }, [analysis, user?.id]);
 
   // Execute Autonomous Discovery Pipeline
   const handleRunDiscovery = async () => {

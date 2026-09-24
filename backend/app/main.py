@@ -739,6 +739,8 @@ async def list_reports(
             pass
     if not resolved_user_id and user_id:
         resolved_user_id = user_id
+    if not resolved_user_id:
+        return []
     return await db.list_reports(user_id=resolved_user_id, limit=50)
 
 

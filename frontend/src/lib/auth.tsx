@@ -395,8 +395,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     localStorage.removeItem("vyepari_x_google_user");
     // Clear session-scoped caches so a different user doesn't see stale data
     try {
-      sessionStorage.removeItem("vyaperi_reports_cache");
-      sessionStorage.removeItem("vyaperi_onboarding");
+      sessionStorage.clear();
     } catch {}
   };
 

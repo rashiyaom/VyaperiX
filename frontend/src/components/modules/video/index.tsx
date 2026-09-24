@@ -97,14 +97,14 @@ export function VideoMeetingModule({
   reports = [],
   onNavigateToIntelligence,
 }: VideoMeetingModuleProps) {
-  const { session } = useAuth();
+  const { user, session } = useAuth();
 
   // Tab State: "start" (Start Meeting) | "history" (Meeting History)
   const [activeTab, setActiveTab] = useState<"start" | "history">("start");
 
   // Report Selection & Launch State
   const [selectedReportId, setSelectedReportId] = useState<string | null>(() => {
-    const doneReports = reports.filter((r) => r.status === "done");
+    const doneReports = (reports || []).filter((r) => r.status === "done");
     return doneReports.length > 0 ? (doneReports[0]?.id ?? null) : null;
   });
   const [fallbackReports, setFallbackReports] = useState<ReportItem[]>([]);
@@ -145,19 +145,22 @@ export function VideoMeetingModule({
   };
 
   // Combine reports from props or fallback query
-  const effectiveReports = reports.length > 0 ? reports : fallbackReports;
+  const effectiveReports = reports !== undefined ? reports : fallbackReports;
   const completedReports = effectiveReports.filter((r) => r.status === "done");
 
-  // Fallback fetch if reports prop is empty
+  // Fallback fetch ONLY if reports prop was completely omitted
   useEffect(() => {
-    if (reports.length === 0) {
+    if (reports === undefined) {
+      const validUserId = user?.id && user.id !== "undefined" && user.id !== "null" ? user.id : null;
+      if (!validUserId) return;
       const fetchReports = async () => {
         try {
-          const res = await fetch(`${API_BASE}/api/reports`, { headers: getAuthHeaders() });
+          const res = await fetch(`${API_BASE}/api/reports?user_id=${encodeURIComponent(validUserId)}`, { headers: getAuthHeaders() });
           if (res.ok) {
             const data = await res.json();
-            setFallbackReports(data);
-            const done = data.filter((r: any) => r.status === "done");
+            const safeData = Array.isArray(data) ? data : [];
+            setFallbackReports(safeData);
+            const done = safeData.filter((r: any) => r.status === "done");
             if (done.length > 0 && !selectedReportId) {
               setSelectedReportId(done[0].id);
             }
@@ -168,12 +171,14 @@ export function VideoMeetingModule({
       };
       fetchReports();
     }
-  }, [reports.length]);
+  }, [reports, user?.id]);
 
   // Keep selectedReportId in sync when completed reports change
   useEffect(() => {
-    if (!selectedReportId && completedReports.length > 0 && completedReports[0]?.id) {
-      setSelectedReportId(completedReports[0].id);
+    if (completedReports.length === 0) {
+      setSelectedReportId(null);
+    } else if (!selectedReportId || !completedReports.some((r) => r.id === selectedReportId)) {
+      setSelectedReportId(completedReports[0]?.id ?? null);
     }
   }, [completedReports, selectedReportId]);
 

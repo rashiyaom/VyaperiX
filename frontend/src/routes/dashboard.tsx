@@ -1820,14 +1820,7 @@ function DashboardPage() {
     }
     return "intake";
   });
-  const [recentReports, setRecentReports] = useState<RecentReport[]>(() => {
-    // Seed from session cache so data is always present on refresh — no flash
-    try {
-      const cached = sessionStorage.getItem("vyaperi_reports_cache");
-      if (cached) return JSON.parse(cached) as RecentReport[];
-    } catch {}
-    return [];
-  });
+  const [recentReports, setRecentReports] = useState<RecentReport[]>([]);
   const [activeAnalysis, setActiveAnalysis] = useState<FullAnalysis | null>(null);
   const [activeCompanyInfo, setActiveCompanyInfo] = useState<{ name: string; industry: string; score: number }>({
     name: "",
@@ -1864,16 +1857,49 @@ function DashboardPage() {
         }
       }
     } catch {}
+
+    // Clean legacy global cache
+    try {
+      sessionStorage.removeItem("vyaperi_reports_cache");
+    } catch {}
+
     // Only fetch when we have a settled user ID — avoids double-fire during auth hydration
     if (userId && userId !== "undefined" && userId !== "null") {
+      try {
+        const userCached = sessionStorage.getItem(`vyaperi_reports_cache_${userId}`);
+        if (userCached) {
+          const parsed = JSON.parse(userCached) as RecentReport[];
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setRecentReports(parsed);
+            const latestDone = parsed.find((r) => r.status === "done" && r.analysis?.company_name);
+            if (latestDone) {
+              setActiveCompanyInfo({
+                name: latestDone.analysis!.company_name!,
+                industry: latestDone.analysis!.industry || "B2B Tech",
+                score: latestDone.analysis!.opportunity_score || 88,
+              });
+              setActiveAnalysis(latestDone.analysis as FullAnalysis);
+            }
+          }
+        }
+      } catch {}
       fetchRecents();
+    } else {
+      setRecentReports([]);
+      setActiveAnalysis(null);
+      setActiveCompanyInfo({ name: "", industry: "", score: 0 });
     }
   }, [userId, profile]);
 
   const fetchRecents = async () => {
     try {
       const validUserId = user?.id && user.id !== "undefined" && user.id !== "null" ? user.id : null;
-      const url = validUserId ? `${API_BASE}/api/reports?user_id=${encodeURIComponent(validUserId)}` : `${API_BASE}/api/reports`;
+      if (!validUserId) {
+        setRecentReports([]);
+        setActiveAnalysis(null);
+        return;
+      }
+      const url = `${API_BASE}/api/reports?user_id=${encodeURIComponent(validUserId)}`;
       const headers: Record<string, string> = {};
       if (session?.access_token) {
         headers["Authorization"] = `Bearer ${session.access_token}`;
@@ -1881,10 +1907,13 @@ function DashboardPage() {
       const res = await safeApiFetch(url, { headers });
       if (res.ok) {
         const data = await res.json();
-        // Update state and persist to session cache — prevents flash on next refresh
-        setRecentReports(data);
-        try { sessionStorage.setItem("vyaperi_reports_cache", JSON.stringify(data)); } catch {}
-        const latestDone = data.find((r: any) => r.status === "done" && r.analysis?.company_name);
+        const safeData = Array.isArray(data) ? data : [];
+        setRecentReports(safeData);
+        try {
+          sessionStorage.setItem(`vyaperi_reports_cache_${validUserId}`, JSON.stringify(safeData));
+          sessionStorage.removeItem("vyaperi_reports_cache");
+        } catch {}
+        const latestDone = safeData.find((r: any) => r.status === "done" && r.analysis?.company_name);
         if (latestDone) {
           setActiveCompanyInfo({
             name: latestDone.analysis.company_name,
@@ -1892,6 +1921,8 @@ function DashboardPage() {
             score: latestDone.analysis.opportunity_score || 88,
           });
           setActiveAnalysis(latestDone.analysis);
+        } else {
+          setActiveAnalysis(null);
         }
       }
     } catch {}
