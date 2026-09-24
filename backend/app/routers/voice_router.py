@@ -80,6 +80,8 @@ class VoiceSettingsPayload(BaseModel):
     public_webhook_url: Optional[str] = None
     voice_provider: Optional[str] = "sarvam"
     voice_id: Optional[str] = "priya"
+    sms_alerts_enabled: Optional[bool] = True
+    alert_phone_number: Optional[str] = None
 
 
 class TTSRequest(BaseModel):
@@ -594,8 +596,9 @@ async def get_stats(
 
 @router.get("/config")
 async def get_config():
-    """Get active voice and telephony configuration (masked for security)."""
+    """Get active voice, telephony, and SMS configuration (masked for security)."""
     creds = await voice_engine.get_credentials()
+    db_settings = await db.get_voice_settings()
     return {
         "has_vapi_key": bool(creds.get("vapi_api_key")),
         "vapi_key_masked": f"...{creds['vapi_api_key'][-4:]}" if creds.get("vapi_api_key") else "",
@@ -612,6 +615,14 @@ async def get_config():
         "public_webhook_url": creds.get("public_webhook_url", "") or os.getenv("PUBLIC_BASE_URL", ""),
         "voice_provider": creds.get("voice_provider", "sarvam"),
         "voice_id": creds.get("voice_id", "priya"),
+        "sms_alerts_enabled": (
+            db_settings.get("sms_alerts_enabled")
+            if isinstance(db_settings.get("sms_alerts_enabled"), bool)
+            else (db_settings.get("sms_alerts_enabled", "true").lower() not in ("false", "0", "no", "off"))
+            if isinstance(db_settings.get("sms_alerts_enabled"), str)
+            else True
+        ),
+        "alert_phone_number": db_settings.get("alert_phone_number", ""),
     }
 
 
@@ -645,6 +656,10 @@ async def save_config(payload: VoiceSettingsPayload):
         updates["voice_provider"] = payload.voice_provider.strip()
     if payload.voice_id is not None:
         updates["voice_id"] = payload.voice_id.strip()
+    if payload.sms_alerts_enabled is not None:
+        updates["sms_alerts_enabled"] = payload.sms_alerts_enabled
+    if payload.alert_phone_number is not None:
+        updates["alert_phone_number"] = payload.alert_phone_number.strip()
 
     await db.save_voice_settings(updates)
     return {"success": True, "message": "Voice and telephony configuration updated successfully"}
