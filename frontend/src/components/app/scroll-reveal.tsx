@@ -17,9 +17,9 @@ export function ScrollReveal({
   children,
   variant = "fade-up",
   delay = 0,
-  duration = 600,
+  duration = 500,
   className = "",
-  threshold = 0.12,
+  threshold = 0.01,
   once = true,
 }: ScrollRevealProps) {
   const [isVisible, setIsVisible] = useState(false);
@@ -40,7 +40,7 @@ export function ScrollReveal({
       },
       {
         threshold,
-        rootMargin: "0px 0px -40px 0px",
+        rootMargin: "50px 0px 50px 0px",
       },
     );
 

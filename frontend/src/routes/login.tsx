@@ -20,7 +20,6 @@ import { Logo } from "@/components/site/Chrome";
 import { LangSwitcher, useLang } from "@/components/app/lang";
 import { ThemeToggle } from "@/components/app/theme";
 import { useAuth } from "@/lib/auth";
-import { GoogleLogin } from "@react-oauth/google";
 
 export const Route = createFileRoute("/login")({
   head: () => ({
@@ -81,12 +80,12 @@ function Counter({ end, label, suffix = "" }: { end: number; label: string; suff
     return () => clearInterval(timer);
   }, [end]);
   return (
-    <div className="text-center">
-      <div className="font-display text-2xl font-extrabold text-paper tabular-nums">
+    <div className="border border-white/15 bg-white/[0.04] p-4 backdrop-blur-md transition-colors hover:border-violet/40">
+      <div className="font-display text-2xl sm:text-3xl font-extrabold text-white tabular-nums tracking-tight">
         {val.toLocaleString()}
         {suffix}
       </div>
-      <div className="mt-1 font-mono text-[10px] text-paper/50 uppercase tracking-widest">
+      <div className="mt-1.5 font-mono text-[10px] sm:text-[11px] font-bold text-neutral-300 uppercase tracking-wider">
         {label}
       </div>
     </div>
@@ -117,7 +116,6 @@ function GoogleIcon() {
 }
 
 function LoginPage() {
-  const API_BASE = (import.meta.env["VITE_SCRAPER_API_BASE"] as string) || "http://127.0.0.1:8000";
   const { t } = useLang();
   const navigate = useNavigate();
   const {
@@ -178,13 +176,6 @@ function LoginPage() {
   ];
   const headline = useTypewriter(headlines);
 
-  const personas = [
-    { key: "Enterprise Account Executive", desc: "Full pipeline + voice fleet", company: "Apex Global Dynamics" },
-    { key: "SDR Team Lead", desc: "Prospect discovery + cold conversion", company: "Krypton Commerce" },
-    { key: "Growth Founder", desc: "Commercial due-diligence + radar", company: "Synthetix AI Lab" },
-    { key: "Commercial Analyst", desc: "Multi-source PDF/CSV/Web reports", company: "Meridian Partners" },
-  ];
-
   const handleGoogleLogin = async () => {
     setErrorMessage(null);
     setGoogleLoading(true);
@@ -197,78 +188,28 @@ function LoginPage() {
     }
   };
 
-  /* ─── Instant Admin Provisioning Bypass (Rate Limit Solution) ─── */
-  const handleBypassRegister = async () => {
-    if (!workEmail || !password) {
-      setErrorMessage("Please enter both work email and password.");
-      return;
-    }
-    setLoading(true);
-    setErrorMessage(null);
-    try {
-      const res = await fetch(`${API_BASE}/api/auth/register`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: workEmail,
-          password: password,
-          full_name: fullName,
-          company_name: companyName,
-          industry: industry,
-          auto_confirm: true,
-        }),
-      });
-
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.detail || "Failed to provision account.");
-      }
-
-      const { session: authedSession, error: signInErr } = await signInWithEmail(
-        workEmail,
-        password
-      );
-
-      if (signInErr) {
-        throw new Error(signInErr.message);
-      }
-
-      if (authedSession) {
-        setSuccessMessage("✓ Workspace activated! Launching onboarding…");
-        try {
-          sessionStorage.setItem(
-            "vyaperi_onboarding",
-            JSON.stringify({
-              name: fullName || "Sales Leader",
-              email: workEmail,
-              company: companyName || "My Enterprise",
-              industry,
-              teamSize: "2–10",
-              useCase: "full_cycle",
-              source: "Admin Provisioned",
-            })
-          );
-        } catch {}
-        setTimeout(() => navigate({ to: "/onboarding" }), 600);
-      }
-    } catch (err: any) {
-      setErrorMessage(err?.message || "Failed to provision workspace.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
   /* ─── Sign Up Handler (Supabase) ─── */
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
     setSuccessMessage(null);
 
-    if (!workEmail || !password) {
+    const cleanEmail = workEmail.trim();
+    const cleanPassword = password.trim();
+    const cleanName = fullName.trim();
+
+    if (!cleanEmail || !cleanPassword) {
       setErrorMessage("Please enter both work email and password.");
       return;
     }
-    if (password.length < 6) {
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(cleanEmail)) {
+      setErrorMessage("Please enter a valid work email address.");
+      return;
+    }
+
+    if (cleanPassword.length < 6) {
       setErrorMessage("Password must be at least 6 characters long.");
       return;
     }
@@ -276,61 +217,14 @@ function LoginPage() {
     setLoading(true);
     try {
       const { user, session: newSession, error, needsVerification } = await signUpWithEmail(
-        workEmail,
-        password,
+        cleanEmail,
+        cleanPassword,
         {
-          full_name: fullName,
-          company_name: companyName,
+          full_name: cleanName,
+          company_name: companyName.trim(),
           industry,
         }
       );
-
-      if (error && error.message?.toLowerCase().includes("rate limit")) {
-        console.info("Supabase email rate limit exceeded — activating admin provisioning bypass...");
-        try {
-          const bypassRes = await fetch(`${API_BASE}/api/auth/register`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              email: workEmail,
-              password: password,
-              full_name: fullName,
-              company_name: companyName,
-              industry: industry,
-              auto_confirm: true,
-            }),
-          });
-
-          if (bypassRes.ok) {
-            const { session: authedSession, error: signInErr } = await signInWithEmail(
-              workEmail,
-              password
-            );
-
-            if (!signInErr && authedSession) {
-              setSuccessMessage("✓ Workspace Provisioned! Launching onboarding…");
-              try {
-                sessionStorage.setItem(
-                  "vyaperi_onboarding",
-                  JSON.stringify({
-                    name: fullName || "Sales Leader",
-                    email: workEmail,
-                    company: companyName || "My Enterprise",
-                    industry,
-                    teamSize: "2–10",
-                    useCase: "full_cycle",
-                    source: "Admin Provisioned",
-                  })
-                );
-              } catch {}
-              setTimeout(() => navigate({ to: "/onboarding" }), 600);
-              return;
-            }
-          }
-        } catch (adminErr) {
-          console.warn("Admin bypass failed:", adminErr);
-        }
-      }
 
       if (error) {
         setErrorMessage(error.message);
@@ -343,8 +237,8 @@ function LoginPage() {
         sessionStorage.setItem(
           "vyaperi_onboarding",
           JSON.stringify({
-            name: fullName || "Sales Leader",
-            email: workEmail,
+            name: cleanName || "Sales Leader",
+            email: cleanEmail,
             company: companyName || "My Enterprise",
             industry,
             teamSize: "2–10",
@@ -355,7 +249,7 @@ function LoginPage() {
       } catch {}
 
       if (needsVerification || (!newSession && user)) {
-        setPendingEmail(workEmail);
+        setPendingEmail(cleanEmail);
         setVerificationPending(true);
         setResendCooldown(30);
       } else if (newSession) {
@@ -369,22 +263,36 @@ function LoginPage() {
     }
   };
 
-  /* ─── Sign In Handler (Supabase) ─── */
+  /* ─── Sign In Handler (Supabase with Strict Validation) ─── */
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
     setSuccessMessage(null);
 
-    if (!workEmail || !password) {
-      setErrorMessage("Please enter both work email and password.");
+    const cleanEmail = workEmail.trim();
+    const cleanPassword = password.trim();
+
+    if (!cleanEmail || !cleanPassword) {
+      setErrorMessage("Please enter both your work email and password.");
+      return;
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(cleanEmail)) {
+      setErrorMessage("Please enter a valid work email address.");
+      return;
+    }
+
+    if (cleanPassword.length < 6) {
+      setErrorMessage("Password must be at least 6 characters.");
       return;
     }
 
     setLoading(true);
     try {
       const { user: authedUser, session: authedSession, error } = await signInWithEmail(
-        workEmail,
-        password
+        cleanEmail,
+        cleanPassword
       );
 
       if (error) {
@@ -392,12 +300,12 @@ function LoginPage() {
           error.message?.toLowerCase().includes("email not confirmed") ||
           error.message?.toLowerCase().includes("not verified")
         ) {
-          setPendingEmail(workEmail);
+          setPendingEmail(cleanEmail);
           setErrorMessage(
             "Your email address has not been confirmed yet. Please verify your email using the link sent to your inbox."
           );
         } else {
-          setErrorMessage(error.message || "Invalid email or password.");
+          setErrorMessage(error.message || "Invalid email or password. Please check your credentials.");
         }
         setLoading(false);
         return;
@@ -408,10 +316,12 @@ function LoginPage() {
         const isDone = Boolean(authedUser.user_metadata?.["onboarding_completed"]);
         setTimeout(() => {
           navigate({ to: isDone ? "/dashboard" : "/onboarding" });
-        }, 600);
+        }, 500);
+      } else {
+        setErrorMessage("Invalid email or password. Please try again.");
       }
     } catch (err: any) {
-      setErrorMessage(err?.message || "Sign in failed.");
+      setErrorMessage(err?.message || "Sign in failed. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -442,17 +352,18 @@ function LoginPage() {
     e.preventDefault();
     setErrorMessage(null);
     setSuccessMessage(null);
-    if (!workEmail) {
+    const cleanEmail = workEmail.trim();
+    if (!cleanEmail) {
       setErrorMessage("Please provide your work email to send a reset link.");
       return;
     }
     setLoading(true);
     try {
-      const { error } = await resetPassword(workEmail);
+      const { error } = await resetPassword(cleanEmail);
       if (error) {
         setErrorMessage(error.message);
       } else {
-        setSuccessMessage(`✓ Password reset email sent to ${workEmail}. Please check your inbox.`);
+        setSuccessMessage(`✓ Password reset email sent to ${cleanEmail}. Please check your inbox.`);
       }
     } catch (err: any) {
       setErrorMessage(err?.message || "Failed to send reset link.");
@@ -461,38 +372,29 @@ function LoginPage() {
     }
   };
 
-  /* ─── Instant Sandbox Persona Login ─── */
-  const handlePersonaLogin = (persona: (typeof personas)[0]) => {
-    setLoading(true);
-    try {
-      sessionStorage.setItem(
-        "vyaperi_onboarding",
-        JSON.stringify({ company: persona.company, industry: "B2B Tech" })
-      );
-    } catch {}
-    setTimeout(() => {
-      navigate({ to: "/dashboard" });
-    }, 400);
-  };
-
   return (
-    <div className="grid min-h-screen lg:grid-cols-[1.1fr_1fr]">
-      {/* ── Left Branding Panel (Permanent Dark Cyberpunk Style) ── */}
-      <div className="relative hidden flex-col justify-between border-r border-neutral-800 bg-neutral-950 p-12 text-neutral-100 lg:flex overflow-hidden">
-        <div className="grid-paper absolute inset-0 opacity-20" />
+    <div className="grid min-h-screen lg:grid-cols-[1.1fr_1fr] bg-paper text-ink">
+      {/* ── Left Branding Panel (Cyberpunk Dark Aesthetic with High Contrast) ── */}
+      <div className="relative hidden flex-col justify-between border-r border-white/10 bg-[#0B0C12] p-12 text-white lg:flex overflow-hidden">
+        {/* Ambient Grid Pattern */}
+        <div className="absolute inset-0 bg-[linear-gradient(to_right,#ffffff08_1px,transparent_1px),linear-gradient(to_bottom,#ffffff08_1px,transparent_1px)] bg-[size:32px_32px] opacity-40 pointer-events-none" />
 
         {/* Top Brand Bar */}
         <div className="flex items-center justify-between relative z-10">
           <Logo />
           <div className="flex items-center gap-2">
-            <ThemeToggle />
+            <ThemeToggle className="text-white hover:text-lime" />
             <LangSwitcher dark />
           </div>
         </div>
 
         {/* Dynamic Typewriter Hero */}
-        <div className="relative z-10 space-y-6">
-          <div className="min-h-[5.5rem] font-display text-[clamp(2rem,4.2vw,3.6rem)] font-extrabold leading-[0.9]">
+        <div className="relative z-10 space-y-6 my-auto">
+          <div className="inline-flex items-center gap-2 border border-lime/30 bg-lime/10 px-3 py-1 font-mono text-[11px] font-bold text-lime uppercase tracking-widest">
+            <span className="h-1.5 w-1.5 rounded-full bg-lime animate-pulse" /> Enterprise Engine
+          </div>
+
+          <div className="min-h-[5.5rem] font-display text-[clamp(2.2rem,4.2vw,3.6rem)] font-extrabold leading-[0.92] text-white">
             {headline}
             <span
               className="border-r-2 border-lime ml-1"
@@ -501,12 +403,13 @@ function LoginPage() {
               &nbsp;
             </span>
           </div>
+
           <p className="max-w-md font-mono text-xs leading-relaxed text-neutral-300">
-            Autonomous multi-source intelligence, 40+ signal buying intent discovery radar, and multilingual voice SDR fleet. Powered by Supabase Auth & Postgres.
+            Autonomous multi-source intelligence, 40+ signal buying intent discovery radar, and multilingual voice SDR fleet. Zero manual qualification required.
           </p>
 
-          {/* Metrics */}
-          <div className="grid grid-cols-3 gap-px border border-white/15 bg-white/10">
+          {/* High Contrast Metrics */}
+          <div className="grid grid-cols-3 gap-3 pt-2">
             <Counter end={11} label="Pipeline Gates" suffix="" />
             <Counter end={40} label="Signal Feeds" suffix="+" />
             <Counter end={14} label="Hours Saved / Wk" suffix="h" />
@@ -514,23 +417,23 @@ function LoginPage() {
         </div>
 
         {/* Bottom Feature Badges */}
-        <div className="relative z-10 flex items-center gap-6 border-t border-white/15 pt-6 text-neutral-400 font-mono text-xs">
-          <span className="flex items-center gap-1.5">
+        <div className="relative z-10 flex items-center justify-between border-t border-white/10 pt-6 text-neutral-400 font-mono text-xs">
+          <span className="flex items-center gap-2 text-neutral-300">
             <ShieldCheck className="w-4 h-4 text-lime" /> Supabase JWT Encrypted
           </span>
-          <span className="flex items-center gap-1.5">
-            <Zap className="w-4 h-4 text-lime" /> Instant Workspace Provisioning
+          <span className="flex items-center gap-2 text-neutral-300">
+            <Zap className="w-4 h-4 text-lime" /> Zero-Trust Security
           </span>
         </div>
       </div>
 
       {/* ── Right Auth Form Panel ── */}
-      <div className="flex flex-col bg-paper">
+      <div className="flex flex-col bg-paper text-ink">
         {/* Top bar */}
         <div className="flex items-center justify-between border-b border-ink/20 px-6 py-4">
           <Link
             to="/"
-            className="inline-flex items-center gap-2 label-mono hover:text-violet transition-colors text-xs"
+            className="inline-flex items-center gap-2 label-mono hover:text-violet transition-colors text-xs text-ink"
           >
             <ArrowLeft className="h-3.5 w-3.5" /> Back to Home
           </Link>
@@ -543,10 +446,10 @@ function LoginPage() {
           </div>
         </div>
 
-        <div className="mx-auto w-full max-w-lg flex-1 px-6 py-8 flex flex-col justify-center">
-          <div className="space-y-1">
-            <span className="label-mono text-violet font-bold text-xs">// Supabase Authenticated Access</span>
-            <h2 className="font-display text-3xl font-extrabold uppercase">
+        <div className="mx-auto w-full max-w-lg flex-1 px-6 py-10 flex flex-col justify-center">
+          <div className="space-y-1.5">
+            <span className="label-mono text-violet font-bold text-xs">// Secure Supabase Authentication</span>
+            <h2 className="font-display text-3xl font-extrabold uppercase text-ink">
               {verificationPending
                 ? "Verify Your Email"
                 : tab === "Signup"
@@ -568,26 +471,16 @@ function LoginPage() {
 
           {/* Feedback Alerts */}
           {errorMessage && (
-            <div className="mt-4 border border-danger/40 bg-danger/10 p-3 text-xs font-mono text-danger flex items-start gap-2">
+            <div className="mt-5 border border-danger/50 bg-danger/10 p-3.5 text-xs font-mono text-danger flex items-start gap-2.5">
               <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
               <div className="space-y-1">
-                <p>{errorMessage}</p>
-                {errorMessage.toLowerCase().includes("rate limit") && (
-                  <button
-                    type="button"
-                    onClick={handleBypassRegister}
-                    disabled={loading}
-                    className="mt-2 inline-flex items-center gap-1.5 border border-ink bg-ink text-paper px-3 py-1.5 font-mono text-[11px] font-bold hover:bg-violet hover:border-violet transition-colors shadow"
-                  >
-                    <Zap className="w-3.5 h-3.5 text-paper" /> Activate Workspace Instantly (Bypass Email Rate Limit)
-                  </button>
-                )}
+                <p className="font-semibold">{errorMessage}</p>
                 {pendingEmail && (
                   <button
                     type="button"
                     onClick={handleResendVerification}
                     disabled={resendingEmail || resendCooldown > 0}
-                    className="underline text-ink font-bold hover:text-violet block text-[11px]"
+                    className="underline text-ink font-bold hover:text-violet block text-[11px] mt-1"
                   >
                     {resendingEmail
                       ? "Resending..."
@@ -601,22 +494,22 @@ function LoginPage() {
           )}
 
           {successMessage && (
-            <div className="mt-4 border border-lime/40 bg-lime/10 p-3 text-xs font-mono text-lime-800 dark:text-lime flex items-center gap-2">
+            <div className="mt-5 border border-lime/40 bg-lime/10 p-3.5 text-xs font-mono text-lime-800 dark:text-lime flex items-center gap-2.5">
               <CheckCircle2 className="w-4 h-4 shrink-0 text-lime-700 dark:text-lime" />
-              <span>{successMessage}</span>
+              <span className="font-semibold">{successMessage}</span>
             </div>
           )}
 
           {/* Verification Screen */}
           {verificationPending ? (
-            <div className="mt-6 border border-ink/20 bg-secondary/20 p-6 space-y-4 text-center">
+            <div className="mt-6 border border-ink/20 bg-card p-6 space-y-4 text-center">
               <div className="mx-auto w-12 h-12 border border-violet bg-violet/10 text-violet flex items-center justify-center rounded-full">
                 <Mail className="w-6 h-6 animate-pulse" />
               </div>
               <div className="space-y-1">
-                <h3 className="font-display text-lg font-bold uppercase">Check Your Inbox</h3>
+                <h3 className="font-display text-lg font-bold uppercase text-ink">Check Your Inbox</h3>
                 <p className="font-mono text-xs text-muted-foreground">
-                  A custom Vyepari X verification email was sent to:
+                  A custom Vyaperi X verification email was sent to:
                 </p>
                 <div className="font-mono text-xs font-bold text-ink bg-paper border border-ink/20 py-1.5 px-3 inline-block">
                   {pendingEmail}
@@ -656,7 +549,7 @@ function LoginPage() {
           ) : (
             <>
               {/* Tabs */}
-              <div className="mt-6 grid grid-cols-2 gap-px border border-ink bg-ink/15">
+              <div className="mt-6 grid grid-cols-2 gap-px border border-ink/30 bg-ink/15">
                 {[
                   { id: "Signup", label: "Create Account" },
                   { id: "Signin", label: "Sign In" },
@@ -669,7 +562,7 @@ function LoginPage() {
                       setSuccessMessage(null);
                     }}
                     className={`py-2.5 label-mono text-xs font-bold transition-all ${
-                      tab === id ? "bg-ink text-paper" : "bg-paper text-muted-foreground hover:bg-secondary"
+                      tab === id ? "bg-ink text-paper" : "bg-card text-muted-foreground hover:bg-secondary hover:text-ink"
                     }`}
                   >
                     {label}
@@ -683,7 +576,7 @@ function LoginPage() {
                   type="button"
                   onClick={handleGoogleLogin}
                   disabled={googleLoading || loading}
-                  className="w-full border border-ink/30 bg-paper py-3 px-4 font-mono text-xs font-bold text-ink hover:border-violet hover:bg-secondary/40 active:scale-[0.99] transition-all flex items-center justify-center gap-2.5 shadow-sm"
+                  className="w-full border border-ink/30 bg-card py-3 px-4 font-mono text-xs font-bold text-ink hover:border-violet hover:bg-secondary/40 active:scale-[0.99] transition-all flex items-center justify-center gap-2.5 shadow-sm cursor-pointer"
                 >
                   {googleLoading ? (
                     <Loader2 className="w-4 h-4 animate-spin text-violet" />
@@ -744,7 +637,7 @@ function LoginPage() {
                       <select
                         value={industry}
                         onChange={(e) => setIndustry(e.target.value)}
-                        className="mt-1.5 w-full border border-ink/30 bg-paper px-3 py-2.5 font-mono text-xs text-ink outline-none focus:border-violet focus:ring-1 focus:ring-violet transition-all"
+                        className="mt-1.5 w-full border border-ink/30 bg-card px-3 py-2.5 font-mono text-xs text-ink outline-none focus:border-violet focus:ring-1 focus:ring-violet transition-all"
                       >
                         <option value="SaaS / Technology">SaaS / Technology</option>
                         <option value="Financial Services">Financial Services</option>
@@ -758,7 +651,7 @@ function LoginPage() {
                   <button
                     type="submit"
                     disabled={loading}
-                    className="w-full mt-2 border border-ink bg-ink text-paper py-3.5 label-mono font-bold hover:border-violet hover:bg-violet active:scale-[0.98] transition-all flex items-center justify-center gap-2 shadow-md"
+                    className="w-full mt-3 border border-ink bg-ink text-paper py-3.5 label-mono font-bold hover:border-violet hover:bg-violet active:scale-[0.98] transition-all flex items-center justify-center gap-2 shadow-md cursor-pointer"
                   >
                     {loading ? (
                       <>
@@ -779,7 +672,7 @@ function LoginPage() {
                         setTab("Signin");
                         setErrorMessage(null);
                       }}
-                      className="text-violet font-bold hover:underline"
+                      className="text-violet font-bold hover:underline cursor-pointer"
                     >
                       Sign In
                     </button>
@@ -815,7 +708,7 @@ function LoginPage() {
                         setErrorMessage(null);
                         setSuccessMessage(null);
                       }}
-                      className="font-mono text-[11px] text-violet hover:underline"
+                      className="font-mono text-[11px] text-violet hover:underline cursor-pointer"
                     >
                       Forgot password?
                     </button>
@@ -824,7 +717,7 @@ function LoginPage() {
                   <button
                     type="submit"
                     disabled={loading}
-                    className="w-full mt-2 border border-ink bg-ink text-paper py-3.5 label-mono font-bold hover:border-violet hover:bg-violet active:scale-[0.98] transition-all flex items-center justify-center gap-2 shadow-md"
+                    className="w-full mt-3 border border-ink bg-ink text-paper py-3.5 label-mono font-bold hover:border-violet hover:bg-violet active:scale-[0.98] transition-all flex items-center justify-center gap-2 shadow-md cursor-pointer"
                   >
                     {loading ? (
                       <>
@@ -845,7 +738,7 @@ function LoginPage() {
                         setTab("Signup");
                         setErrorMessage(null);
                       }}
-                      className="text-violet font-bold hover:underline"
+                      className="text-violet font-bold hover:underline cursor-pointer"
                     >
                       Start Free 14-Day Trial
                     </button>
@@ -868,7 +761,7 @@ function LoginPage() {
                   <button
                     type="submit"
                     disabled={loading}
-                    className="w-full mt-2 border border-ink bg-ink text-paper py-3.5 label-mono font-bold hover:border-violet hover:bg-violet active:scale-[0.98] transition-all flex items-center justify-center gap-2 shadow-md"
+                    className="w-full mt-3 border border-ink bg-ink text-paper py-3.5 label-mono font-bold hover:border-violet hover:bg-violet active:scale-[0.98] transition-all flex items-center justify-center gap-2 shadow-md cursor-pointer"
                   >
                     {loading ? (
                       <>
@@ -889,7 +782,7 @@ function LoginPage() {
                         setTab("Signin");
                         setErrorMessage(null);
                       }}
-                      className="text-violet font-bold hover:underline"
+                      className="text-violet font-bold hover:underline cursor-pointer"
                     >
                       Back to Sign In
                     </button>
@@ -898,30 +791,6 @@ function LoginPage() {
               )}
             </>
           )}
-
-          {/* 1-Click Fast Sandbox Personas */}
-          <div className="mt-8 pt-6 border-t border-ink/15">
-            <span className="label-mono text-muted-foreground text-[10px] block mb-2.5">
-              // Instant Sandbox Persona Access (Local Development Testing)
-            </span>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {personas.map((p) => (
-                <button
-                  key={p.key}
-                  type="button"
-                  onClick={() => handlePersonaLogin(p)}
-                  className="border border-ink/15 bg-paper p-3 text-left hover:border-violet hover:bg-secondary/40 transition-all group"
-                >
-                  <span className="font-display text-xs font-bold uppercase text-ink group-hover:text-violet transition-colors block">
-                    {p.key}
-                  </span>
-                  <span className="font-mono text-[10px] text-muted-foreground block truncate">
-                    {p.company} · {p.desc}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
       </div>
     </div>
@@ -960,7 +829,7 @@ function Field({
         onChange={(e) => onChange?.(e.target.value)}
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
-        className="w-full border border-ink/30 bg-paper px-3.5 py-2.5 font-mono text-xs text-ink outline-none placeholder:text-muted-foreground/50 focus:border-violet focus:ring-1 focus:ring-violet transition-all"
+        className="w-full border border-ink/30 bg-card px-3.5 py-2.5 font-mono text-xs text-ink outline-none placeholder:text-muted-foreground/50 focus:border-violet focus:ring-1 focus:ring-violet transition-all"
       />
     </label>
   );
