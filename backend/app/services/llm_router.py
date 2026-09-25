@@ -381,7 +381,7 @@ def default_provider_models(large_context: bool = False) -> list[tuple[str, str]
                 groq_chain.append(("groq", m))
 
     gemini_chain: list[tuple[str, str]] = []
-    gemini_key = os.environ.get("GEMINI_API_KEY", "")
+    gemini_key = os.environ.get("GEMINI_API_KEY", "") or os.environ.get("GEMINI_API_KEY_BACKUP", "")
     if gemini_key:
         cfg = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
         for m in [cfg, "gemini-2.5-flash"]:
@@ -397,8 +397,7 @@ def default_provider_models(large_context: bool = False) -> list[tuple[str, str]
             seen.add(or_model)
             or_chain.append(("openrouter", or_model))
 
-    if large_context:
-        return gemini_chain + groq_chain + or_chain
+    # Always prioritize Groq first; Gemini is strictly fallback
     return groq_chain + gemini_chain + or_chain
 
 
@@ -442,8 +441,9 @@ async def _call_gemini(
     """Async Gemini via run_in_executor (SDK is sync). Router handles retries."""
     from google import genai
     from google.genai import types
+    active_gemini_key = os.environ.get("GEMINI_API_KEY", "") or os.environ.get("GEMINI_API_KEY_BACKUP", "")
     client = genai.Client(
-        api_key=os.environ.get("GEMINI_API_KEY", ""),
+        api_key=active_gemini_key,
         http_options=types.HttpOptions(
             retry_options=types.HttpRetryOptions(attempts=1)
         ),

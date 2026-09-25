@@ -216,7 +216,7 @@ def _extract_pdf_pypdf(content_bytes: bytes, filename: str) -> tuple[str, str]:
 
 
 def _extract_pdf_gemini(content_bytes: bytes, filename: str) -> str:
-    gemini_key = os.environ.get("GEMINI_API_KEY", "")
+    gemini_key = os.environ.get("GEMINI_API_KEY", "") or os.environ.get("GEMINI_API_KEY_BACKUP", "")
     if not gemini_key:
         return ""
     try:
@@ -484,7 +484,7 @@ def extract_image_description(
         except Exception as e:
             logger.warning(f"Groq vision failed for {filename}: {e}. Trying Gemini fallback...")
 
-    gemini_key = os.environ.get("GEMINI_API_KEY", "")
+    gemini_key = os.environ.get("GEMINI_API_KEY", "") or os.environ.get("GEMINI_API_KEY_BACKUP", "")
     if gemini_key:
         try:
             from google import genai  # type: ignore

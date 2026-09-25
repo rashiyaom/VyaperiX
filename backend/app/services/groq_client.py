@@ -567,7 +567,7 @@ def _synthesize_with_gemini(
     individual_doc_insights: list[DocumentInsight] | None = None,
     data_engine_figures: dict | None = None,
 ) -> BusinessAnalysis | None:
-    gemini_key = (os.environ.get("GEMINI_API_KEY") or "").strip()
+    gemini_key = (os.environ.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY_BACKUP") or "").strip()
     if not gemini_key:
         return None
     try:
