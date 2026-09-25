@@ -12,6 +12,7 @@
 import { useEffect, useState } from "react";
 import { AlertTriangle, Loader2, Mic, Play, RefreshCw, Square, Volume2 } from "lucide-react";
 import { SpeakingWave, Tag } from "./ui";
+import { useLang } from "./lang";
 import {
   DEMO_LANGUAGES,
   DEMO_MAX_CHARS,
@@ -34,6 +35,7 @@ function VoiceNotice({
   error: { code: string; message: string } | null;
   blockedUntil: number;
 }) {
+  const { t } = useLang();
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (blockedUntil <= Date.now()) return;
@@ -52,7 +54,7 @@ function VoiceNotice({
       <span>
         {error.message}
         {wait > 0 && error.code !== "network" && (
-          <span className="ml-1 font-bold">Try again in {formatWait(wait)}.</span>
+          <span className="ml-1 font-bold">{t("voice.retry", { t: formatWait(wait, t) })}</span>
         )}
       </span>
     </div>
@@ -64,6 +66,7 @@ function VoiceNotice({
 ────────────────────────────────────────────── */
 export function HeroVoicePreview() {
   const { play, activeId, status, error, blockedUntil } = useDemoVoice();
+  const { t } = useLang();
   const speaker = DEMO_SPEAKERS.female[0]!;
 
   return (
@@ -85,7 +88,7 @@ export function HeroVoicePreview() {
         )}
       </div>
 
-      <div className="flex flex-wrap gap-1.5 pt-0.5">
+      <div className="flex flex-wrap gap-1.5 pt-0.5" translate="no">
         {DEMO_LANGUAGES.map((lang) => {
           const id = `hero-${lang.code}`;
           const isActive = activeId === id;
@@ -94,7 +97,7 @@ export function HeroVoicePreview() {
             <button
               key={lang.code}
               type="button"
-              aria-label={`Hear a ${lang.label} sample`}
+              aria-label={t("voice.play_sample", { lang: t(`langname.${lang.code}`) })}
               aria-pressed={isActive}
               onClick={() =>
                 play(id, {
@@ -139,6 +142,8 @@ export function VoiceAgentSynthesizerWidget({ compact = false }: { compact?: boo
   const [customText, setCustomText] = useState(lang.presets[0]!.text);
 
   const { play, stop, activeId, status, error, quota, blockedUntil } = useDemoVoice();
+  const { t } = useLang();
+  const langName = t(`langname.${langCode}`);
   const [initialQuota, setInitialQuota] = useState(quota);
 
   useEffect(() => {
@@ -186,10 +191,12 @@ export function VoiceAgentSynthesizerWidget({ compact = false }: { compact?: boo
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h3 className="font-display text-base sm:text-lg font-bold text-ink">{speaker.name}</h3>
-              <Tag tone={gender === "female" ? "lime" : "violet"}>{gender.toUpperCase()} VOICE</Tag>
-              <Tag tone="violet">
-                {lang.native === lang.label ? lang.label : `${lang.label} (${lang.native})`}
-              </Tag>
+              <Tag tone={gender === "female" ? "lime" : "violet"}>{t(`voice.tag_${gender}`)}</Tag>
+              <span translate="no">
+                <Tag tone="violet">
+                  {lang.native === lang.label ? lang.label : `${lang.label} (${lang.native})`}
+                </Tag>
+              </span>
             </div>
             <div className="font-mono text-xs text-muted-foreground">
               Sarvam Bulbul v3 · Natural Indic neural voice
@@ -219,9 +226,9 @@ export function VoiceAgentSynthesizerWidget({ compact = false }: { compact?: boo
       {/* Language selector */}
       <div className="space-y-1.5 bg-paper/60 p-3.5 border border-border">
         <div className="label-mono text-[10px] text-muted-foreground">
-          Select Language ({DEMO_LANGUAGES.length} supported):
+          {t("voice.select_lang", { n: DEMO_LANGUAGES.length })}
         </div>
-        <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4 lg:grid-cols-6">
+        <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4 lg:grid-cols-6" translate="no">
           {DEMO_LANGUAGES.map((l) => (
             <button
               key={l.code}
@@ -320,7 +327,10 @@ export function VoiceAgentSynthesizerWidget({ compact = false }: { compact?: boo
                     <Play className="h-3 w-3 opacity-60 group-hover:opacity-100 text-lime-700 dark:text-lime" />
                   )}
                 </div>
-                <div className="font-mono text-[11px] text-muted-foreground line-clamp-2 mt-1 leading-relaxed">
+                <div
+                  translate="no"
+                  className="font-mono text-[11px] text-muted-foreground line-clamp-2 mt-1 leading-relaxed"
+                >
                   "{preset.text}"
                 </div>
               </button>
@@ -336,7 +346,7 @@ export function VoiceAgentSynthesizerWidget({ compact = false }: { compact?: boo
             htmlFor="demo-voice-text"
             className="label-mono text-[10px] text-muted-foreground flex items-center gap-1.5"
           >
-            <Mic className="h-3 w-3 text-violet" /> Type a custom script in {lang.label}:
+            <Mic className="h-3 w-3 text-violet" /> {t("voice.custom_label", { lang: langName })}
           </label>
           <button
             type="button"
@@ -353,7 +363,7 @@ export function VoiceAgentSynthesizerWidget({ compact = false }: { compact?: boo
             value={customText}
             onChange={(e) => setCustomText(e.target.value)}
             className="flex-1 border border-border bg-paper p-3 font-mono text-xs text-ink outline-none focus:border-violet focus:ring-1 focus:ring-violet rounded transition-all resize-none"
-            placeholder={`Type anything in ${lang.label}…`}
+            placeholder={t("voice.placeholder", { lang: langName })}
           />
           <button
             type="button"
@@ -373,12 +383,14 @@ export function VoiceAgentSynthesizerWidget({ compact = false }: { compact?: boo
         </div>
         <div className="flex flex-wrap items-center justify-between gap-2 font-mono text-[10px] text-muted-foreground">
           <span className={overLimit ? "text-danger font-bold" : ""}>
-            {customText.length}/{DEMO_MAX_CHARS} characters
+            {t("voice.chars", { n: customText.length, max: DEMO_MAX_CHARS })}
           </span>
           {shownQuota && (
             <span>
-              {shownQuota.burst_remaining} fresh voice sample{shownQuota.burst_remaining === 1 ? "" : "s"} left
-              in this {Math.round(shownQuota.burst_window_seconds / 60)}-minute window · replays are free
+              {t(shownQuota.burst_remaining === 1 ? "voice.quota_one" : "voice.quota_many", {
+                n: shownQuota.burst_remaining,
+                m: Math.round(shownQuota.burst_window_seconds / 60),
+              })}
             </span>
           )}
         </div>

@@ -166,19 +166,87 @@ const T: Record<string, { en: string; hi?: string; gu?: string }> = {
   "site.console": { en: "Console", hi: "कंसोल", gu: "કન્સોલ" },
   "site.starttrial": { en: "Start free trial", hi: "फ्री ट्रायल", gu: "ફ્રી ટ્રાયલ" },
   "site.trial_short": { en: "Trial", hi: "ट्रायल", gu: "ટ્રાયલ" },
+
+  // Home-page sentences with dynamic parts or inline markup (whole sentences, so word order can differ)
+  "site.voice.intro": {
+    en: "Test our autonomous voice fleet in real-time. Choose between male and female voices across 11 Indian languages — Hindi, Gujarati, English, Marathi, Bengali, Tamil, Telugu, Kannada, Malayalam, Punjabi and Odia. Pick a preset sales phrase or type your own script to hear it spoken by Sarvam AI.",
+    hi: "हमारे स्वायत्त वॉयस फ्लीट को रियल-टाइम में आज़माएँ। 11 भारतीय भाषाओं — हिंदी, गुजराती, अंग्रेज़ी, मराठी, बंगाली, तमिल, तेलुगु, कन्नड़, मलयालम, पंजाबी और ओड़िया — में पुरुष या महिला आवाज़ चुनें। कोई तैयार सेल्स वाक्य चुनें या अपनी स्क्रिप्ट लिखें, और उसे Sarvam AI की आवाज़ में सुनें।",
+    gu: "અમારા સ્વાયત્ત વૉઇસ ફ્લીટને રિયલ-ટાઇમમાં અજમાવો. 11 ભારતીય ભાષાઓ — હિન્દી, ગુજરાતી, અંગ્રેજી, મરાઠી, બંગાળી, તમિલ, તેલુગુ, કન્નડ, મલયાલમ, પંજાબી અને ઓડિયા — માં પુરુષ કે સ્ત્રી અવાજ પસંદ કરો. તૈયાર સેલ્સ વાક્ય પસંદ કરો અથવા તમારી પોતાની સ્ક્રિપ્ટ લખો, અને તેને Sarvam AI ના અવાજમાં સાંભળો.",
+  },
+  "voice.select_lang": {
+    en: "Select Language ({n} supported):",
+    hi: "भाषा चुनें ({n} उपलब्ध):",
+    gu: "ભાષા પસંદ કરો ({n} ઉપલબ્ધ):",
+  },
+  "voice.custom_label": {
+    en: "Type a custom script in {lang}:",
+    hi: "{lang} में अपनी स्क्रिप्ट लिखें:",
+    gu: "{lang} માં તમારી સ્ક્રિપ્ટ લખો:",
+  },
+  "voice.placeholder": {
+    en: "Type anything in {lang}…",
+    hi: "{lang} में कुछ भी लिखें…",
+    gu: "{lang} માં કંઈપણ લખો…",
+  },
+  "voice.chars": { en: "{n}/{max} characters", hi: "{n}/{max} अक्षर", gu: "{n}/{max} અક્ષરો" },
+  "voice.quota_one": {
+    en: "{n} fresh voice sample left in this {m}-minute window · replays are free",
+    hi: "इस {m}-मिनट की अवधि में {n} नया वॉयस सैंपल बचा है · दोबारा सुनना मुफ़्त है",
+    gu: "આ {m}-મિનિટની અવધિમાં {n} નવો વૉઇસ સેમ્પલ બાકી છે · ફરી સાંભળવું મફત છે",
+  },
+  "voice.quota_many": {
+    en: "{n} fresh voice samples left in this {m}-minute window · replays are free",
+    hi: "इस {m}-मिनट की अवधि में {n} नए वॉयस सैंपल बचे हैं · दोबारा सुनना मुफ़्त है",
+    gu: "આ {m}-મિનિટની અવધિમાં {n} નવા વૉઇસ સેમ્પલ બાકી છે · ફરી સાંભળવું મફત છે",
+  },
+  "voice.retry": { en: "Try again in {t}.", hi: "{t} बाद फिर कोशिश करें।", gu: "{t} પછી ફરી પ્રયાસ કરો." },
+  "voice.play_sample": { en: "Play {lang} sample", hi: "{lang} सैंपल सुनें", gu: "{lang} સેમ્પલ સાંભળો" },
+  "voice.tag_female": { en: "FEMALE VOICE", hi: "महिला आवाज़", gu: "સ્ત્રી અવાજ" },
+  "voice.tag_male": { en: "MALE VOICE", hi: "पुरुष आवाज़", gu: "પુરુષ અવાજ" },
+  "time.s": { en: "{n}s", hi: "{n} सेकंड", gu: "{n} સેકન્ડ" },
+  "time.min": { en: "{n} min", hi: "{n} मिनट", gu: "{n} મિનિટ" },
+  "time.h": { en: "{n}h", hi: "{n} घंटे", gu: "{n} કલાક" },
+  "map.session": { en: "{n} this session", hi: "इस सत्र में {n}", gu: "આ સત્રમાં {n}" },
+  "langname.en": { en: "English", hi: "अंग्रेज़ी", gu: "અંગ્રેજી" },
+  "langname.hi": { en: "Hindi", hi: "हिंदी", gu: "હિન્દી" },
+  "langname.gu": { en: "Gujarati", hi: "गुजराती", gu: "ગુજરાતી" },
+  "langname.mr": { en: "Marathi", hi: "मराठी", gu: "મરાઠી" },
+  "langname.bn": { en: "Bengali", hi: "बंगाली", gu: "બંગાળી" },
+  "langname.ta": { en: "Tamil", hi: "तमिल", gu: "તમિલ" },
+  "langname.te": { en: "Telugu", hi: "तेलुगु", gu: "તેલુગુ" },
+  "langname.kn": { en: "Kannada", hi: "कन्नड़", gu: "કન્નડ" },
+  "langname.ml": { en: "Malayalam", hi: "मलयालम", gu: "મલયાલમ" },
+  "langname.pa": { en: "Punjabi", hi: "पंजाबी", gu: "પંજાબી" },
+  "langname.od": { en: "Odia", hi: "ओड़िया", gu: "ઓડિયા" },
+  "login.h1": { en: "11-Step Autonomous Pipeline", hi: "11-चरणीय स्वायत्त पाइपलाइन", gu: "11-પગલાંની સ્વાયત્ત પાઇપલાઇન" },
+  "login.h2": {
+    en: "Lead Radar → Intelligence → Voice SDRs",
+    hi: "लीड रडार → इंटेलिजेंस → वॉयस SDR",
+    gu: "લીડ રડાર → ઇન્ટેલિજન્સ → વૉઇસ SDR",
+  },
+  "login.h3": {
+    en: "Close Enterprise Deals on Autopilot",
+    hi: "एंटरप्राइज़ डील ऑटोपायलट पर क्लोज़ करें",
+    gu: "એન્ટરપ્રાઇઝ ડીલ ઑટોપાઇલટ પર ક્લોઝ કરો",
+  },
+  "hero.turn1": { en: "Turn Raw Company", hi: "कंपनी की कच्ची जानकारी को", gu: "કંપનીની કાચી માહિતીને" },
+  "hero.turn2": { en: "Assets into Board-Grade", hi: "बोर्ड-स्तरीय", gu: "બોર્ડ-સ્તરીય" },
+  "hero.turn3": { en: "Intelligence", hi: "इंटेलिजेंस में बदलें", gu: "ઇન્ટેલિજન્સમાં ફેરવો" },
 };
 
-type LangCtx = { lang: Lang; setLang: (l: Lang) => void; t: (key: string) => string };
+type Vars = Record<string, string | number>;
+type LangCtx = { lang: Lang; setLang: (l: Lang) => void; t: (key: string, vars?: Vars) => string };
 
-const lookup = (key: string, lang: Lang): string => {
+const lookup = (key: string, lang: Lang, vars?: Vars): string => {
   const entry = T[key] as Record<string, string | undefined> | undefined;
-  return entry?.[lang] ?? entry?.["en"] ?? key;
+  const text = entry?.[lang] ?? entry?.["en"] ?? key;
+  return vars ? text.replace(/\{(\w+)\}/g, (m, name: string) => (name in vars ? String(vars[name]) : m)) : text;
 };
 
 const Ctx = createContext<LangCtx>({
   lang: "en",
   setLang: () => {},
-  t: (k) => lookup(k, "en"),
+  t: (k, v) => lookup(k, "en", v),
 });
 
 export function LangProvider({ children }: { children: ReactNode }) {
@@ -207,7 +275,7 @@ export function LangProvider({ children }: { children: ReactNode }) {
       /* ignore */
     }
   };
-  const t = (key: string): string => lookup(key, lang);
+  const t = (key: string, vars?: Vars): string => lookup(key, lang, vars);
   return <Ctx.Provider value={{ lang, setLang, t }}>{children}</Ctx.Provider>;
 }
 

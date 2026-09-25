@@ -25,6 +25,7 @@ import { ScrollProgressBar, ScrollReveal } from "@/components/app/scroll-reveal"
 import { PipelineCarousel } from "@/components/site/PipelineCarousel";
 import { BharatSignalMap } from "@/components/site/BharatSignalMap";
 import { useAuth } from "@/lib/auth";
+import { useLang } from "@/components/app/lang";
 
 const MODULES = [
   {
@@ -256,6 +257,7 @@ const STACK = [
 
 export function MainPlatformLanding() {
   const { user, signOut } = useAuth();
+  const { t } = useLang();
   const [activeLang, setActiveLang] = useState<"hi" | "gu" | "en">("hi");
   const protocol = PROTOCOL_TRANSCRIPTS[activeLang] || PROTOCOL_TRANSCRIPTS["hi"]!;
 
@@ -462,11 +464,7 @@ export function MainPlatformLanding() {
                 </span>
               </SectionHead>
               <p className="mt-4 max-w-2xl font-mono text-xs text-muted-foreground leading-relaxed">
-                Test our autonomous voice fleet in real-time. Choose between{" "}
-                <strong className="text-ink">Male and Female voices</strong> across{" "}
-                <strong className="text-violet">11 Indian languages</strong> — Hindi, Gujarati,
-                English, Marathi, Bengali, Tamil, Telugu, Kannada, Malayalam, Punjabi and Odia.
-                Pick a preset sales phrase or type your own script to hear it spoken by Sarvam AI.
+                {t("site.voice.intro")}
               </p>
             </div>
           </ScrollReveal>
@@ -489,7 +487,7 @@ export function MainPlatformLanding() {
                   timeline objections, and books meetings directly into your CRM.
                 </p>
 
-                <div className="mt-5 flex gap-2">
+                <div className="mt-5 flex gap-2" translate="no">
                   <button
                     onClick={() => setActiveLang("hi")}
                     className={`px-3 py-1.5 font-mono text-xs border transition-colors ${
@@ -685,11 +683,11 @@ export function MainPlatformLanding() {
                   Multi-Source: Web + PDF + CSV + Excel + Images
                 </div>
                 <h3 className="font-display text-3xl font-extrabold leading-[0.9] sm:text-4xl text-ink">
-                  Turn Raw Company
+                  {t("hero.turn1")}
                   <br />
-                  Assets into Board-Grade
+                  {t("hero.turn2")}
                   <br />
-                  <span className="text-violet">Intelligence</span>
+                  <span className="text-violet">{t("hero.turn3")}</span>
                 </h3>
                 <p className="max-w-md font-mono text-xs leading-relaxed text-muted-foreground">
                   Paste a company URL, attach their pitch decks, financial sheets, or product

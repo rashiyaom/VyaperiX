@@ -10,7 +10,8 @@
     "dev:whatsapp": "npm --prefix whatsapp-gateway run start",
     "build:web": "npm --prefix frontend run build",
     "i18n:collect": "python scripts/i18n/collect_strings.py",
-    "i18n:translate": "python scripts/i18n/translate_strings.py",
-    "i18n:check": "python scripts/i18n/check_translations.py"
+    "i18n:check": "python scripts/i18n/check_translations.py",
+    "i18n:apply": "python scripts/i18n/apply_manual.py",
+    "i18n:coverage": "python scripts/i18n/coverage.py"
   }
 }

@@ -1,0 +1,6 @@
+# Strings that only render on random / timed events (the collector may never see them). One per line.
+Meeting booked
+Lead qualified
+Demo confirmed
+Callback scheduled
+Call connected

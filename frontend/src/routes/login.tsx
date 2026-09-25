@@ -197,9 +197,9 @@ function LoginPage() {
 
   const headlines = [
     t("login.tagline") || "Autonomous AI Sales Intelligence",
-    "11-Step Autonomous Pipeline",
-    "Lead Radar → Intelligence → Voice SDRs",
-    "Close Enterprise Deals on Autopilot",
+    t("login.h1"),
+    t("login.h2"),
+    t("login.h3"),
   ];
   const headline = useTypewriter(headlines);
 

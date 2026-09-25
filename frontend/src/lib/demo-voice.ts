@@ -353,8 +353,8 @@ export function useDemoVoice() {
   return { play, stop, activeId, status, error, quota, blockedUntil, clearError: () => setError(null) };
 }
 
-export function formatWait(seconds: number): string {
-  if (seconds >= 3600) return `${Math.ceil(seconds / 3600)}h`;
-  if (seconds >= 60) return `${Math.ceil(seconds / 60)} min`;
-  return `${Math.max(1, Math.ceil(seconds))}s`;
+export function formatWait(seconds: number, t: (key: string, vars?: Record<string, string | number>) => string): string {
+  if (seconds >= 3600) return t("time.h", { n: Math.ceil(seconds / 3600) });
+  if (seconds >= 60) return t("time.min", { n: Math.ceil(seconds / 60) });
+  return t("time.s", { n: Math.max(1, Math.ceil(seconds)) });
 }

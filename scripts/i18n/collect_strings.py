@@ -20,6 +20,11 @@ PAGES = ["/", "/login"]
 OUT = os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "src", "i18n", "source-strings.json")
 
 INDIC = re.compile(r"[ऀ-෿]")
+# Runtime sentences with dynamic values are translated through t() in components/app/lang.tsx, not the dictionary.
+HANDLED_BY_T = re.compile(
+    r"^\d+/\d+ characters$|fresh voice samples? left|^Try again in |^\d+ this session$|^Select Language \(|"
+    r"^Type a custom script in|^Type anything in |^Play .+ sample$|^Test our autonomous voice fleet"
+)
 LATIN = re.compile(r"[A-Za-z]")
 
 COLLECTOR = r"""
@@ -72,12 +77,15 @@ async def main():
             for y in range(0, h + 900, 500):            # trigger scroll-reveal sections
                 await page.evaluate(f"window.scrollTo(0,{y})"); await page.wait_for_timeout(90)
             # step through tabs / carousels / sandbox (skip nav links & external anchors)
-            await click_all(page, "main button:not([type=submit]), section button")
+            await click_all(page, "button:not([type=submit]):not([aria-haspopup]):not([aria-label^=Language])")
             await page.evaluate("window.scrollTo(0,0)")
             await page.wait_for_timeout(400)
             strings |= set(await page.evaluate("[...window.__i18nSeen]"))
         await b.close()
-    keep = sorted(s for s in strings if LATIN.search(s) and not INDIC.search(s) and len(s) > 2)
+    extra = os.path.join(os.path.dirname(__file__), "extra_strings.txt")
+    if os.path.exists(extra):
+        strings |= {l.strip() for l in open(extra, encoding="utf-8") if l.strip() and not l.startswith("#")}
+    keep = sorted(s for s in strings if LATIN.search(s) and not INDIC.search(s) and len(s) > 2 and not HANDLED_BY_T.search(s))
     # Drop typewriter/animation fragments: a string that is a mid-word prefix of another captured string.
     keep = [s for s in keep if not any(t != s and t.startswith(s) and t[len(s)].isalnum() for t in keep)]
     os.makedirs(os.path.dirname(OUT), exist_ok=True)

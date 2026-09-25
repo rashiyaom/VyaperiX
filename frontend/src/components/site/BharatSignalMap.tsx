@@ -12,6 +12,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { SpeakingWave, LiveDot } from "@/components/app/ui";
+import { useLang } from "@/components/app/lang";
 
 type LangKey = "hi" | "gu" | "en" | "mr" | "bn" | "ta" | "te" | "kn" | "ml" | "pa" | "od";
 
@@ -120,6 +121,7 @@ const PULSE_MS = 2200;
 const BUBBLE_MS = 3000;
 
 export function BharatSignalMap() {
+  const { t } = useLang();
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [events, setEvents] = useState<Ev[]>([]);
@@ -457,7 +459,7 @@ export function BharatSignalMap() {
       {/* Narration column */}
       <div className="flex flex-col gap-6">
         {/* Greeting card */}
-        <div className="border border-ink bg-card p-5 shadow-lg" translate="no">
+        <div className="border border-ink bg-card p-5 shadow-lg">
           <div className="label-mono flex items-center justify-between text-[10px] text-muted-foreground">
             <span>NOW SPEAKING</span>
             <span className="flex items-center gap-1.5 text-emerald-700 dark:text-lime">
@@ -466,6 +468,7 @@ export function BharatSignalMap() {
           </div>
           <div
             key={current?.id ?? 0}
+            translate="no"
             className="mt-4 min-h-[5.5rem] font-display text-2xl font-extrabold leading-snug text-ink sm:text-3xl"
             style={{ animation: "fade-in-up 0.5s both" }}
           >
@@ -475,7 +478,7 @@ export function BharatSignalMap() {
             {current ? `${current.city.name} · ${currentLang!.native}` : "Waiting for first call…"}
           </div>
 
-          <div className="mt-5 flex flex-wrap gap-1.5">
+          <div className="mt-5 flex flex-wrap gap-1.5" translate="no">
             {LANG_ORDER.map((k) => (
               <span
                 key={k}
@@ -495,7 +498,7 @@ export function BharatSignalMap() {
         <div className="border border-ink bg-card shadow-lg">
           <div className="label-mono flex items-center justify-between border-b border-ink/20 px-4 py-2.5 text-[10px] text-muted-foreground">
             <span>LIVE CALL FEED</span>
-            <span className="tabular-nums text-ink">{total} this session</span>
+            <span className="tabular-nums text-ink">{t("map.session", { n: total })}</span>
           </div>
           <ul className="divide-y divide-ink/10">
             {events.length === 0 && (
