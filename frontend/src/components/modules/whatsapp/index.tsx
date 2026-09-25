@@ -35,13 +35,14 @@ interface GatewayStatus {
 export function WhatsAppModule({ companyName = "VyaperiX" }: WhatsAppModuleProps) {
   const { session } = useAuth();
   const [statusData, setStatusData] = useState<GatewayStatus | null>(null);
+  const isConnected = Boolean(statusData?.connected);
   const [qrBase64, setQrBase64] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
   const [sendResult, setSendResult] = useState<{ success: boolean; msg: string } | null>(null);
 
   // Dispatch Form State
-  const [targetPhone, setTargetPhone] = useState("+91 9727662885");
+  const [targetPhone, setTargetPhone] = useState("");
   const [msgType, setMsgType] = useState<"meeting" | "requirements" | "custom">("meeting");
   const [customerName, setCustomerName] = useState("Rajesh Sharma");
   const [agenda, setAgenda] = useState("Autonomous Voice SDR & WhatsApp Gateway Demo");
@@ -180,8 +181,6 @@ export function WhatsAppModule({ companyName = "VyaperiX" }: WhatsAppModuleProps
       setSending(false);
     }
   };
-
-  const isConnected = Boolean(statusData?.connected);
 
   useEffect(() => {
     fetchStatus();
