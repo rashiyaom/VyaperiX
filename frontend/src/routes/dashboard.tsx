@@ -34,6 +34,7 @@ import {
   ListChecks,
   Zap,
   ShieldCheck,
+  ShieldAlert,
   TrendingUp,
   Printer,
   LogOut,
