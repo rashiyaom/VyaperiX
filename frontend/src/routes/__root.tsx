@@ -17,7 +17,7 @@ import { ChatWidget } from "@/components/chat/ChatWidget";
 
 const GOOGLE_CLIENT_ID =
   (import.meta.env["VITE_GOOGLE_CLIENT_ID"] as string) ||
-  "391009136971-gf8l99nmb21ed49bj621ts1o1cs4f4kn.apps.googleusercontent.com";
+  "664525232659-fd0c7qpmje55689nud9v678m1vt7a5sm.apps.googleusercontent.com";
 
 import appCss from "../styles.css?url";
 import { reportError } from "../lib/error-reporting";
