@@ -1,8 +1,34 @@
-import { createContext, useContext, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { Check, ChevronDown } from "lucide-react";
+import { applySiteLanguage, availableSiteLanguages } from "@/i18n/site-translator";
 
-export type Lang = "en" | "hi" | "gu";
+export type Lang = "en" | "hi" | "gu" | "mr" | "bn" | "ta" | "te" | "kn" | "ml";
 
-const T: Record<string, Record<Lang, string>> = {
+/**
+ * Languages offered in the switcher (only those with a shipped dictionary — see i18n/translations).
+ * `short` is what the compact trigger shows.
+ */
+export const LANGUAGES = [
+  { code: "en", short: "EN", native: "English", english: "English" },
+  { code: "hi", short: "हि", native: "हिन्दी", english: "Hindi" },
+  { code: "gu", short: "ગુ", native: "ગુજરાતી", english: "Gujarati" },
+  { code: "mr", short: "मरा", native: "मराठी", english: "Marathi" },
+  { code: "bn", short: "বাং", native: "বাংলা", english: "Bengali" },
+  { code: "ta", short: "தமி", native: "தமிழ்", english: "Tamil" },
+  { code: "te", short: "తె", native: "తెలుగు", english: "Telugu" },
+  { code: "kn", short: "ಕನ್", native: "ಕನ್ನಡ", english: "Kannada" },
+  { code: "ml", short: "മല", native: "മലയാളം", english: "Malayalam" },
+].filter((l) => availableSiteLanguages.has(l.code)) as {
+  code: Lang;
+  short: string;
+  native: string;
+  english: string;
+}[];
+
+const STORAGE_KEY = "vyaperix.lang";
+
+const T: Record<string, { en: string; hi?: string; gu?: string }> = {
   // Header / nav
   "header.console": { en: "Sales Console", hi: "सेल्स कंसोल", gu: "સેલ્સ કન્સોલ" },
   "header.status": { en: "Pipeline active", hi: "पाइपलाइन सक्रिय", gu: "પાઇપલાઇન સક્રિય" },
@@ -144,15 +170,44 @@ const T: Record<string, Record<Lang, string>> = {
 
 type LangCtx = { lang: Lang; setLang: (l: Lang) => void; t: (key: string) => string };
 
+const lookup = (key: string, lang: Lang): string => {
+  const entry = T[key] as Record<string, string | undefined> | undefined;
+  return entry?.[lang] ?? entry?.["en"] ?? key;
+};
+
 const Ctx = createContext<LangCtx>({
   lang: "en",
   setLang: () => {},
-  t: (k) => T[k]?.en ?? k,
+  t: (k) => lookup(k, "en"),
 });
 
 export function LangProvider({ children }: { children: ReactNode }) {
-  const [lang, setLang] = useState<Lang>("en");
-  const t = (key: string): string => T[key]?.[lang] ?? T[key]?.en ?? key;
+  const [lang, setLangState] = useState<Lang>("en");
+
+  // Restore the saved choice after hydration (initial render stays "en" so SSR markup matches).
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY) as Lang | null;
+      if (saved && LANGUAGES.some((l) => l.code === saved)) setLangState(saved);
+    } catch {
+      /* storage blocked — stay on English */
+    }
+  }, []);
+
+  // Translate the page body (hardcoded copy) from the pre-generated dictionaries.
+  useEffect(() => {
+    void applySiteLanguage(lang);
+  }, [lang]);
+
+  const setLang = (l: Lang) => {
+    setLangState(l);
+    try {
+      localStorage.setItem(STORAGE_KEY, l);
+    } catch {
+      /* ignore */
+    }
+  };
+  const t = (key: string): string => lookup(key, lang);
   return <Ctx.Provider value={{ lang, setLang, t }}>{children}</Ctx.Provider>;
 }
 
@@ -160,32 +215,110 @@ export function useLang() {
   return useContext(Ctx);
 }
 
+/**
+ * Compact language dropdown: a small bordered trigger (matches the header controls) that opens a
+ * short list. The list is portalled and fixed-positioned so it is never clipped by the mobile menu.
+ */
 export function LangSwitcher({ dark = false }: { dark?: boolean }) {
   const { lang, setLang } = useLang();
-  const langs: { code: Lang; label: string }[] = [
-    { code: "en", label: "EN" },
-    { code: "hi", label: "हि" },
-    { code: "gu", label: "ગુ" },
-  ];
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ top: number; right: number }>({ top: 0, right: 0 });
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const current = LANGUAGES.find((l) => l.code === lang) ?? LANGUAGES[0]!;
+
+  const toggle = () => {
+    if (!open && btnRef.current) {
+      const r = btnRef.current.getBoundingClientRect();
+      setPos({ top: r.bottom + 4, right: Math.max(8, window.innerWidth - r.right) });
+    }
+    setOpen((o) => !o);
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: Event) => {
+      const target = e.target as Node;
+      if (menuRef.current?.contains(target) || btnRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+    const esc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setOpen(false);
+        btnRef.current?.focus();
+      }
+    };
+    const dismiss = () => setOpen(false);
+    document.addEventListener("pointerdown", close);
+    document.addEventListener("keydown", esc);
+    window.addEventListener("resize", dismiss);
+    window.addEventListener("scroll", dismiss, true);
+    return () => {
+      document.removeEventListener("pointerdown", close);
+      document.removeEventListener("keydown", esc);
+      window.removeEventListener("resize", dismiss);
+      window.removeEventListener("scroll", dismiss, true);
+    };
+  }, [open]);
+
   return (
-    <div className="flex gap-px border border-ink/30 shrink-0">
-      {langs.map(({ code, label }) => (
-        <button
-          key={code}
-          onClick={() => setLang(code)}
-          className={`px-1.5 py-1 sm:px-2.5 sm:py-1.5 font-mono text-[9px] sm:text-[10px] font-bold uppercase transition-colors shrink-0 ${
-            lang === code
-              ? dark
-                ? "bg-paper text-ink"
-                : "bg-ink text-paper"
-              : dark
-                ? "bg-transparent text-paper/60 hover:text-paper"
-                : "bg-transparent text-ink/60 hover:text-ink"
-          }`}
-        >
-          {label}
-        </button>
-      ))}
+    <div translate="no" className="shrink-0">
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={toggle}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={`Language: ${current.english}`}
+        className={`flex items-center gap-1 border px-1.5 py-1 sm:px-2.5 sm:py-1.5 font-mono text-[9px] sm:text-[10px] font-bold uppercase transition-colors ${
+          dark
+            ? "border-paper/30 text-paper hover:bg-paper/10"
+            : "border-ink/30 text-ink hover:bg-ink/5"
+        }`}
+      >
+        {current.short}
+        <ChevronDown className={`h-3 w-3 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+
+      {open &&
+        createPortal(
+          <div
+            ref={menuRef}
+            translate="no"
+            role="listbox"
+            aria-label="Select language"
+            style={{ position: "fixed", top: pos.top, right: pos.right }}
+            className="z-[300] w-44 border border-ink bg-paper py-1 shadow-xl"
+          >
+            {LANGUAGES.map((l) => {
+              const active = l.code === lang;
+              return (
+                <button
+                  key={l.code}
+                  type="button"
+                  role="option"
+                  aria-selected={active}
+                  onClick={() => {
+                    setLang(l.code);
+                    setOpen(false);
+                    btnRef.current?.focus();
+                  }}
+                  className={`flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left font-mono text-xs transition-colors ${
+                    active ? "bg-ink text-paper" : "text-ink hover:bg-secondary"
+                  }`}
+                >
+                  <span className="font-bold">{l.native}</span>
+                  {active ? (
+                    <Check className="h-3 w-3" />
+                  ) : (
+                    <span className="text-[10px] text-muted-foreground">{l.english}</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

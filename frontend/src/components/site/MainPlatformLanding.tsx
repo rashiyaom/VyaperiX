@@ -12,7 +12,6 @@ import {
   Users,
   Globe,
   Radio,
-  Volume2,
   Play,
 } from "lucide-react";
 import { useState, useEffect } from "react";
@@ -23,6 +22,7 @@ import { Tag, Bar, SpeakingWave, LiveDot } from "@/components/app/ui";
 import { VoiceAgentSynthesizerWidget, HeroVoicePreview } from "@/components/app/voice-synthesizer";
 import { ScrollProgressBar, ScrollReveal } from "@/components/app/scroll-reveal";
 import { PipelineCarousel } from "@/components/site/PipelineCarousel";
+import { BharatSignalMap } from "@/components/site/BharatSignalMap";
 
 const MODULES = [
   {
@@ -125,34 +125,6 @@ const CAPABILITIES = [
   },
 ];
 
-const PROTOCOL_TRANSCRIPTS: Record<
-  string,
-  { title: string; agent: string; lead: string; outcome: string; lines: [string, string][] }
-> = {
-  hi: {
-    title: "Hindi Voice Protocol — Ananya Sharma (Northbridge Infra)",
-    agent: "Saanvi",
-    lead: "Ananya Sharma",
-    outcome: "INTERESTED · Meeting booked Thu 11:00 IST",
-    lines: [
-      [
-        "AGENT",
-        "नमस्ते Ananya जी, मैं Vyaperi X से बोल रही हूँ। आपने SharePoint migration partner के बारे में पोस्ट किया था — क्या अभी वह project active है?",
-      ],
-      [
-        "PROSPECT",
-        "हाँ, हम Q4 में शुरू करना चाहते हैं। Budget approved हो चुका है और legacy migration मुख्य scope है।",
-      ],
-      ["AGENT", "समझ गई। क्या Microsoft 365 integration और user training भी scope में शामिल है?"],
-      ["PROSPECT", "बिल्कुल, दोनों चाहिए।"],
-      [
-        "AGENT",
-        "बढ़िया — गुरुवार सुबह 11 बजे हमारे Senior Solution Architect के साथ एक scoping call schedule कर देती हूँ?",
-      ],
-      ["PROSPECT", "हाँ, चलेगा। ईमेल पर इनवाइट भेज दीजिए।"],
-    ],
-  },
-};
 
 const LIVE_DISCOVERY_FEED = [
   {
@@ -203,12 +175,6 @@ const STACK = [
 ];
 
 export function MainPlatformLanding() {
-  const [activeLang, setActiveLang] = useState<"hi" | "gu" | "en">("hi");
-  const protocol = PROTOCOL_TRANSCRIPTS[activeLang]!;
-
-  // Interactive ROI Calculator State
-  const [teamSize, setTeamSize] = useState(5);
-  const [avgDealSize, setAvgDealSize] = useState(10); // Lakhs
   const [activeLeadTicker, setActiveLeadTicker] = useState(0);
 
   useEffect(() => {
@@ -217,11 +183,6 @@ export function MainPlatformLanding() {
     }, 3800);
     return () => clearInterval(interval);
   }, []);
-
-  // Calculated ROI Metrics
-  const projectedMeetings = teamSize * 28;
-  const pipelineGeneratedCr = ((projectedMeetings * 0.22 * avgDealSize) / 10).toFixed(1);
-  const costSavingsLakhs = (teamSize * 7.5).toFixed(1);
 
   return (
     <div
@@ -366,111 +327,22 @@ export function MainPlatformLanding() {
         </div>
       </section>
 
-      {/* ── /04 INTERACTIVE PIPELINE & ROI CALCULATOR ── */}
-      <section className="border-b border-ink/20 bg-secondary/30">
+      {/* ── /04 BHARAT SIGNAL MAP — MULTILINGUAL REACH ── */}
+      <section id="reach" className="border-b border-ink/20 bg-secondary/30 overflow-hidden">
         <div className="mx-auto max-w-[1400px] px-4 py-16 lg:px-8">
           <ScrollReveal variant="fade-up">
-            <SectionHead index="04" title="Enterprise ROI & Pipeline Multiplier">
-              <span className="label-mono text-muted-foreground">Interactive Capacity Planner</span>
+            <SectionHead index="04" title="One Agent. Every Language. Every City.">
+              <span className="label-mono text-muted-foreground">Live Multilingual Reach</span>
             </SectionHead>
+            <p className="mt-4 max-w-2xl font-mono text-xs leading-relaxed text-muted-foreground">
+              Watch the voice fleet fan out from a single hub — each call opens in the prospect's own
+              language and script, then qualifies, books and syncs the meeting to your CRM.
+            </p>
           </ScrollReveal>
 
-          <div className="mt-8 grid gap-8 lg:grid-cols-[1fr_1.2fr]">
-            {/* Controls */}
-            <ScrollReveal variant="fade-right" delay={100}>
-              <div className="border border-ink bg-card p-6 space-y-6 shadow-md h-full flex flex-col justify-between">
-                <div className="space-y-6">
-                  <div className="space-y-2">
-                    <div className="flex justify-between font-mono text-xs">
-                      <span className="font-bold">Current SDR Team Headcount:</span>
-                      <span className="text-violet font-extrabold text-sm">{teamSize} Reps</span>
-                    </div>
-                    <input
-                      type="range"
-                      min="1"
-                      max="30"
-                      value={teamSize}
-                      onChange={(e) => setTeamSize(Number(e.target.value))}
-                      className="w-full accent-violet cursor-pointer"
-                    />
-                    <div className="flex justify-between font-mono text-[10px] text-muted-foreground">
-                      <span>1 Rep</span>
-                      <span>15 Reps</span>
-                      <span>30+ Reps</span>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2 pt-4 border-t border-border">
-                    <div className="flex justify-between font-mono text-xs">
-                      <span className="font-bold">Average ACV / Deal Size:</span>
-                      <span className="text-emerald-700 dark:text-lime font-extrabold text-sm">
-                        ₹{avgDealSize} Lakhs
-                      </span>
-                    </div>
-                    <input
-                      type="range"
-                      min="2"
-                      max="50"
-                      step="2"
-                      value={avgDealSize}
-                      onChange={(e) => setAvgDealSize(Number(e.target.value))}
-                      className="w-full accent-emerald-600 dark:accent-lime cursor-pointer"
-                    />
-                    <div className="flex justify-between font-mono text-[10px] text-muted-foreground">
-                      <span>₹2 Lakhs</span>
-                      <span>₹25 Lakhs</span>
-                      <span>₹50+ Lakhs</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="border border-border/80 bg-paper p-4 font-mono text-xs text-muted-foreground leading-relaxed mt-4">
-                  <span className="text-ink font-bold">Calculation Model:</span> Assumes 40
-                  calls/day per autonomous voice agent with 61% connect rate and 22% meeting
-                  conversion on qualified in-market intent posts.
-                </div>
-              </div>
-            </ScrollReveal>
-
-            {/* Projected Value Metrics */}
-            <ScrollReveal variant="fade-left" delay={200}>
-              <div className="grid gap-4 sm:grid-cols-3 h-full">
-                <div className="border border-ink bg-card p-6 flex flex-col justify-between shadow hover:border-violet transition-colors">
-                  <div className="label-mono text-xs text-muted-foreground">Projected Meetings</div>
-                  <div className="my-4 font-display text-4xl font-extrabold text-ink tabular-nums">
-                    {projectedMeetings}
-                  </div>
-                  <div className="font-mono text-xs text-emerald-700 dark:text-lime font-bold">
-                    +340% vs manual SDRs
-                  </div>
-                </div>
-
-                <div className="border border-ink bg-card p-6 flex flex-col justify-between shadow hover:border-violet transition-colors">
-                  <div className="label-mono text-xs text-muted-foreground">
-                    Monthly Pipeline Value
-                  </div>
-                  <div className="my-4 font-display text-4xl font-extrabold text-violet tabular-nums">
-                    ₹{pipelineGeneratedCr} Cr
-                  </div>
-                  <div className="font-mono text-xs text-muted-foreground">
-                    In qualified deal stages
-                  </div>
-                </div>
-
-                <div className="border border-ink bg-card p-6 flex flex-col justify-between shadow hover:border-violet transition-colors">
-                  <div className="label-mono text-xs text-muted-foreground">
-                    Annual Cost Savings
-                  </div>
-                  <div className="my-4 font-display text-4xl font-extrabold text-emerald-700 dark:text-lime tabular-nums">
-                    ₹{costSavingsLakhs} L
-                  </div>
-                  <div className="font-mono text-xs text-muted-foreground">
-                    In manual dialing hours
-                  </div>
-                </div>
-              </div>
-            </ScrollReveal>
-          </div>
+          <ScrollReveal variant="fade-up" delay={150}>
+            <BharatSignalMap />
+          </ScrollReveal>
         </div>
       </section>
 
@@ -487,9 +359,9 @@ export function MainPlatformLanding() {
               <p className="mt-4 max-w-2xl font-mono text-xs text-muted-foreground leading-relaxed">
                 Test our autonomous voice fleet in real-time. Choose between{" "}
                 <strong className="text-ink">Male and Female voices</strong> across{" "}
-                <strong className="text-violet">Hindi, Gujarati, and English</strong>. Select preset
-                consultative sales phrases or type your own custom script to hear real-time
-                pronunciation.
+                <strong className="text-violet">11 Indian languages</strong> — Hindi, Gujarati,
+                English, Marathi, Bengali, Tamil, Telugu, Kannada, Malayalam, Punjabi and Odia.
+                Pick a preset sales phrase or type your own script to hear it spoken by Sarvam AI.
               </p>
             </div>
           </ScrollReveal>
@@ -499,102 +371,6 @@ export function MainPlatformLanding() {
             <VoiceAgentSynthesizerWidget />
           </ScrollReveal>
 
-          {/* Protocol Dialogue Inspector */}
-          <div className="grid gap-8 lg:grid-cols-[1fr_1.1fr] pt-4">
-            <ScrollReveal variant="fade-right" delay={200}>
-              <div>
-                <div className="label-mono text-xs text-violet font-bold">
-                  // Autonomous Conversation Turn-Taking:
-                </div>
-                <p className="mt-3 font-mono text-xs leading-relaxed text-muted-foreground">
-                  Every outbound call is culturally attuned and consultative. The AI voice agent
-                  introduces itself, qualifies against your ICP parameters, addresses pricing &
-                  timeline objections, and books meetings directly into your CRM.
-                </p>
-
-                <div className="mt-5 flex gap-2">
-                  <button
-                    onClick={() => setActiveLang("hi")}
-                    className={`px-3 py-1.5 font-mono text-xs border transition-colors ${
-                      activeLang === "hi"
-                        ? "bg-violet text-white border-violet font-bold"
-                        : "border-ink/20 hover:bg-secondary text-ink"
-                    }`}
-                  >
-                    Hindi (हिन्दी)
-                  </button>
-                  <button
-                    onClick={() => setActiveLang("gu")}
-                    className={`px-3 py-1.5 font-mono text-xs border transition-colors ${
-                      activeLang === "gu"
-                        ? "bg-violet text-white border-violet font-bold"
-                        : "border-ink/20 hover:bg-secondary text-ink"
-                    }`}
-                  >
-                    Gujarati (ગુજરાતી)
-                  </button>
-                  <button
-                    onClick={() => setActiveLang("en")}
-                    className={`px-3 py-1.5 font-mono text-xs border transition-colors ${
-                      activeLang === "en"
-                        ? "bg-violet text-white border-violet font-bold"
-                        : "border-ink/20 hover:bg-secondary text-ink"
-                    }`}
-                  >
-                    English (UK/Global)
-                  </button>
-                </div>
-
-                <ul className="mt-6 space-y-2.5">
-                  {[
-                    "Sub-150ms speech-to-speech conversational turnaround",
-                    "Dialect-aware pronunciation across Indian & global regional accents",
-                    "Real-time objection detection & dynamic playbook adaptation",
-                    "Instant CRM meeting confirmation with audio recording & transcript",
-                  ].map((li) => (
-                    <li key={li} className="flex gap-2.5 font-mono text-xs text-ink">
-                      <span className="text-emerald-700 dark:text-lime font-bold">✓</span>
-                      {li}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </ScrollReveal>
-
-            <ScrollReveal variant="fade-left" delay={250}>
-              <div className="border border-ink bg-card p-6 text-ink shadow-lg space-y-4 rounded-none">
-                <div className="flex items-center justify-between border-b border-border pb-3">
-                  <span className="label-mono text-xs text-muted-foreground flex items-center gap-2">
-                    <Volume2 className="h-4 w-4 text-violet" />
-                    {protocol.title}
-                  </span>
-                  <Tag tone="lime">Agent: {protocol.agent}</Tag>
-                </div>
-
-                <div className="space-y-3 font-mono text-xs max-h-64 overflow-y-auto pr-1">
-                  {protocol.lines.map(([role, text], idx) => (
-                    <div
-                      key={idx}
-                      className={`p-3 rounded border leading-relaxed ${
-                        role === "AGENT"
-                          ? "bg-violet/10 border-violet/30 text-ink ml-4"
-                          : "bg-secondary border-border mr-4"
-                      }`}
-                    >
-                      <div className="font-bold text-[10px] mb-1 text-muted-foreground">
-                        [{role === "AGENT" ? `AI AGENT — ${protocol.agent}` : protocol.lead}]
-                      </div>
-                      <div>{text}</div>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="mt-2 border border-ink bg-lime px-3 py-2 label-mono text-lime-foreground text-center font-bold">
-                  {protocol.outcome}
-                </div>
-              </div>
-            </ScrollReveal>
-          </div>
         </div>
       </section>
 

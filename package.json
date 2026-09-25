@@ -7,6 +7,9 @@
     "dev:web": "npm --prefix frontend run dev",
     "dev:backend": "cd backend && python -m uvicorn app.main:app --reload --port 8000",
     "dev:whatsapp": "npm --prefix whatsapp-gateway run start",
-    "build:web": "npm --prefix frontend run build"
+    "build:web": "npm --prefix frontend run build",
+    "i18n:collect": "python scripts/i18n/collect_strings.py",
+    "i18n:translate": "python scripts/i18n/translate_strings.py",
+    "i18n:check": "python scripts/i18n/check_translations.py"
   }
 }

@@ -43,6 +43,7 @@ from app.routers import video_router
 from app.routers import calendar_router
 from app.routers import profile_router
 from app.routers import whatsapp_router
+from app.routers import demo_voice_router
 from app.services.search.router import get_search_router
 from config.domain_trust import classify_and_filter, SeedUrl
 
@@ -89,6 +90,9 @@ app.include_router(calendar_router.router, prefix="/api/calendar", tags=["Calend
 
 # Mount WhatsApp Integration Router
 app.include_router(whatsapp_router.router, prefix="/api/whatsapp", tags=["WhatsApp"])
+
+# Mount public website voice-preview router (own Sarvam key, IP rate-limited, isolated from calling agents)
+app.include_router(demo_voice_router.router, prefix="/api/demo-voice", tags=["Website Voice Demo"])
 
 # Mount User Profile Router (backed by MongoDB)
 app.include_router(profile_router.router, prefix="/api/profile", tags=["User Profile"])
