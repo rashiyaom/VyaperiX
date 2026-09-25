@@ -1157,6 +1157,86 @@ async def handle_vapi_webhook(payload: dict) -> dict:
     call_reason = matching_call["call_reason"]
     direction = matching_call.get("direction", "outbound")
 
+    # ── Real-Time Hate Speech / Abuse Interception ────────────────────────────
+    # Vapi fires a "transcript" event for every completed speech turn in real-time.
+    # We check customer turns for offensive language and warn or terminate.
+    if msg_type == "transcript":
+        role = (message.get("role") or "").strip().lower()
+        text = (message.get("transcript") or message.get("text") or "").strip()
+        if role in ("user", "customer") and text:
+            ABUSE_WORDS = [
+                "fuck", "fucker", "fucking", "bitch", "bastard", "asshole", "shit",
+                "motherfucker", "dickhead", "chutiya", "madarchod", "gandu", "bhosdike",
+                "randi", "haramkhor", "saala", "sala", "kuttey", "kamina", "harami",
+                "mc", "bc", "rape", "kill you", "idiot", "stupid", "shut up",
+                "bhosdi", "gaand", "lund", "chut",
+            ]
+            text_lower = text.lower()
+            detected_words = [w for w in ABUSE_WORDS if w in text_lower]
+
+            if detected_words:
+                guardrail = await db.get_guardrail_settings()
+                max_strikes = int(guardrail.get("max_strikes", 2))
+                action = guardrail.get("action_on_rude", "warn")
+                warning_phrase = guardrail.get(
+                    "warning_phrase",
+                    "I understand you may be upset, but please maintain respectful language so I can assist you better.",
+                )
+                termination_phrase = guardrail.get(
+                    "termination_phrase",
+                    "This call is being ended due to abusive language. Thank you.",
+                )
+
+                current_strikes = int(matching_call.get("abuse_strikes", 0)) + 1
+                await db.update_voice_call(call_id, {
+                    "abuse_strikes": current_strikes,
+                    "abuse_detected": True,
+                    "flagged": "abusive_language_realtime",
+                    "abuse_details": f"Real-time abuse detected (strike {current_strikes}): {', '.join(detected_words[:4])}",
+                })
+                logger.warning(
+                    f"[{call_id}] Real-time abuse detected (strike {current_strikes}/{max_strikes}): {detected_words[:3]}"
+                )
+
+                creds = await get_credentials()
+                vapi_key = creds.get("vapi_api_key", "")
+                if vapi_key and vapi_call_id:
+                    if current_strikes >= max_strikes:
+                        # Terminate call
+                        try:
+                            async with httpx.AsyncClient(timeout=6.0) as hc:
+                                await hc.delete(
+                                    f"{VAPI_BASE_URL}/call/{vapi_call_id}",
+                                    headers={"Authorization": f"Bearer {vapi_key}"},
+                                )
+                            await db.update_voice_call(call_id, {
+                                "status": "completed",
+                                "ended_at": _now_iso(),
+                                "call_outcome": "Abusive Terminated",
+                                "sentiment": "hostile_or_abusive",
+                            })
+                            logger.warning(f"[{call_id}] Call terminated after {current_strikes} abuse strikes.")
+                        except Exception as term_err:
+                            logger.warning(f"[{call_id}] Failed to terminate abusive call: {term_err}")
+                        return {"status": "terminated_abuse", "call_id": call_id, "strikes": current_strikes}
+                    else:
+                        # Inject warning message via Vapi say endpoint
+                        try:
+                            async with httpx.AsyncClient(timeout=6.0) as hc:
+                                await hc.post(
+                                    f"{VAPI_BASE_URL}/call/{vapi_call_id}/say",
+                                    headers={
+                                        "Authorization": f"Bearer {vapi_key}",
+                                        "Content-Type": "application/json",
+                                    },
+                                    json={"text": warning_phrase, "interrupt": True},
+                                )
+                        except Exception as say_err:
+                            logger.warning(f"[{call_id}] Failed to inject abuse warning: {say_err}")
+                        return {"status": "warned_abuse", "call_id": call_id, "strikes": current_strikes}
+
+        return {"status": "transcript_received"}
+
     if msg_type in ("status-update", "call.status"):
         status = message.get("status") or call_obj.get("status")
         mapped_status = "in-progress"

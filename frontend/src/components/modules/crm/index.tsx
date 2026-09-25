@@ -181,7 +181,7 @@ export function CRMModule({ companyName = "VyaperiX" }: CRMModuleProps) {
         contact_id: data.contact_id,
         deal_id: data.deal_id,
         mode: data.mode,
-        message: `✓ Test commercial lead transferred to CRM! Contact ID: ${data.contact_id}, Deal ID: ${data.deal_id} (${data.mode === "live" ? "Live HubSpot v3 API" : "Safe Sandbox Mode (Stored in MongoDB)"})`,
+        message: `✓ Commercial lead synced to CRM! Contact ID: ${data.contact_id}, Deal ID: ${data.deal_id} (${data.mode === "live" ? "Live HubSpot v3 API" : "MongoDB Native — Real Data Stored"})`,
       });
       await loadData();
     } catch (err: any) {
@@ -272,7 +272,7 @@ export function CRMModule({ companyName = "VyaperiX" }: CRMModuleProps) {
         throw new Error(data.detail || "Batch sync failed");
       }
       setSyncSuccessMsg(
-        `Successfully synced ${data.synced_count} leads to HubSpot (${data.mode === "live" ? "Live API" : "Simulated Sandbox"}). Total Deal Pipeline: ₹${(data.total_deal_value || 0).toLocaleString("en-IN")}`
+        `Successfully synced ${data.synced_count} leads to CRM (${data.mode === "live" ? "Live HubSpot API" : "MongoDB Native Storage"}). Total Deal Pipeline: ₹${(data.total_deal_value || 0).toLocaleString("en-IN")}`
       );
       await loadData();
     } catch (err: any) {
@@ -506,7 +506,7 @@ export function CRMModule({ companyName = "VyaperiX" }: CRMModuleProps) {
               }`}
             />
             <span className="font-display text-base font-extrabold text-ink uppercase">
-              {status?.hubspot?.mode === "live" ? "Live Bearer Token" : "Sandbox Simulation"}
+              {status?.hubspot?.mode === "live" ? "Live HubSpot Token" : "MongoDB Native Storage"}
             </span>
           </div>
           <p className="font-mono text-[10px] text-muted-foreground">
@@ -798,7 +798,7 @@ export function CRMModule({ companyName = "VyaperiX" }: CRMModuleProps) {
                         </span>
                       </div>
                       <span className="text-[9px] text-muted-foreground capitalize">
-                        {rec.hubspot_mode === "live" ? "HubSpot Live" : "Sandbox"}
+                        {rec.hubspot_mode === "live" ? "HubSpot Live" : "MongoDB Native"}
                       </span>
                     </td>
 

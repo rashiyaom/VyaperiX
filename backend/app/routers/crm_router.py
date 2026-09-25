@@ -112,7 +112,7 @@ async def get_crm_status(
         "has_token": has_token,
         "token_preview": f"pat-na1-...{token[-4:]}" if len(token) > 8 else ("Configured" if has_token else "Not Set"),
         "has_webhook": bool(webhook_url.strip()),
-        "mode": "live" if has_token else "sandbox",
+        "mode": "live" if has_token else "mongodb_native",
         "synced_contacts_count": synced_contacts_count,
         "synced_deals_count": synced_deals_count,
         "total_pipeline_value": total_pipeline,
@@ -123,7 +123,7 @@ async def get_crm_status(
             "has_token": has_token,
             "connected": True,
             "mode": "live" if has_token else "sandbox_mock",
-            "message": "Connected to HubSpot Direct API v3" if has_token else "Running in HubSpot Sandbox Simulation Mode",
+            "message": "Connected to HubSpot Direct API v3" if has_token else "MongoDB Native Storage — All leads & deals are stored in real database. Connect HubSpot token to also push to HubSpot CRM.",
         },
         "webhook": {
             "configured": bool(webhook_url.strip()),

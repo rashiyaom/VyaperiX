@@ -522,6 +522,38 @@ async def _fetch_and_sync_tavus_transcript(call: dict) -> dict:
                             updates["recording_url"] = rec_url
                             call["recording_url"] = rec_url
 
+                # Fallback: Tavus also returns transcript directly in response body.
+                # Catches cases where webhook was never delivered (no PUBLIC_WEBHOOK_URL configured).
+                if not updates.get("transcript"):
+                    direct_turns_raw = data.get("transcript") or []
+                    if isinstance(direct_turns_raw, list) and direct_turns_raw:
+                        turns = _format_tavus_transcript(direct_turns_raw)
+                        if turns:
+                            existing_turns = call.get("transcript") or []
+                            merged = _merge_transcripts(existing_turns, turns) if existing_turns else turns
+                            updates["transcript"] = merged
+                            call["transcript"] = merged
+                            dur = _calculate_call_duration(direct_turns_raw, call)
+                            if dur > 0:
+                                updates["duration_seconds"] = dur
+                                call["duration_seconds"] = dur
+                            if not call.get("analysis") and tavus_status == "ended":
+                                try:
+                                    analysis = await asyncio.to_thread(
+                                        voice_engine.analyze_call_with_groq,
+                                        business_name=call.get("business_name") or "Enterprise Prospect",
+                                        customer_name=call.get("customer_name") or "Prospect",
+                                        call_reason=call.get("call_reason") or "AI Video Sales Consultation",
+                                        transcript=merged,
+                                        direction="video",
+                                    )
+                                    updates["analysis"] = analysis
+                                    updates["status"] = "ended"
+                                    call["analysis"] = analysis
+                                    call["status"] = "ended"
+                                except Exception as a_err:
+                                    logger.warning(f"Groq analysis on direct transcript for {call_id}: {a_err}")
+
                 if updates:
                     await db.update_video_call(call_id, updates)
     except Exception as exc:
@@ -770,8 +802,8 @@ async def list_video_meetings(
     limit: int = 100,
     user: auth_middleware.AuthUser = Depends(auth_middleware.require_auth),
 ):
-    user_filter = None if (user.email and ("marshal.yash.ai@gmail.com" in user.email.lower() or "yashbharvada4@gmail.com" in user.email.lower())) else user.id
-    calls = await db.list_video_calls(user_id=user_filter, limit=limit)
+    user_email_clean = (user.email or "").strip().lower()
+    calls = await db.list_video_calls(user_id=user.id, user_email=user_email_clean, limit=limit)
     return calls
 
 

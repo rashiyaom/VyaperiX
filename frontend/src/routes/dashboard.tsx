@@ -2058,8 +2058,12 @@ function DashboardPage() {
     // Only fetch when we have a settled user ID — avoids double-fire during auth hydration
     if (userId && userId !== "undefined" && userId !== "null") {
       try {
-        const userCached = localStorage.getItem(`vyaperi_reports_cache_${userId}`) ||
-                           sessionStorage.getItem(`vyaperi_reports_cache_${userId}`);
+        const userEmail = user?.email?.toLowerCase();
+        // Check both userId-keyed and email-keyed cache (cross-provider auth fallback)
+        const userCached =
+          localStorage.getItem(`vyaperi_reports_cache_${userId}`) ||
+          sessionStorage.getItem(`vyaperi_reports_cache_${userId}`) ||
+          (userEmail ? localStorage.getItem(`vyaperi_reports_cache_email_${userEmail}`) : null);
         if (userCached) {
           const parsed = JSON.parse(userCached) as RecentReport[];
           if (Array.isArray(parsed) && parsed.length > 0) {
@@ -2094,22 +2098,22 @@ function DashboardPage() {
         }
       } catch {}
       fetchRecents();
-    } else {
-      setRecentReports([]);
-      setActiveAnalysis(null);
-      setActiveCompanyInfo({ name: "", industry: "", score: 0 });
     }
+    // Do not clear state when userId is momentarily undefined during re-login/auth hydration
   }, [userId, profile]);
 
   const fetchRecents = async () => {
     try {
       const validUserId = user?.id && user.id !== "undefined" && user.id !== "null" ? user.id : null;
+      const userEmail = user?.email?.toLowerCase() || null;
       if (!validUserId) {
-        setRecentReports([]);
-        setActiveAnalysis(null);
+        if (!user) {
+          setRecentReports([]);
+          setActiveAnalysis(null);
+        }
         return;
       }
-      const emailParam = user?.email ? `&user_email=${encodeURIComponent(user.email)}` : "";
+      const emailParam = userEmail ? `&user_email=${encodeURIComponent(userEmail)}` : "";
       const url = `${API_BASE}/api/reports?user_id=${encodeURIComponent(validUserId)}${emailParam}`;
       const headers: Record<string, string> = {};
       const token = session?.access_token || (typeof window !== "undefined" ? localStorage.getItem("vyepari_x_auth_token") : null);
@@ -2124,6 +2128,10 @@ function DashboardPage() {
         try {
           localStorage.setItem(`vyaperi_reports_cache_${validUserId}`, JSON.stringify(safeData));
           sessionStorage.setItem(`vyaperi_reports_cache_${validUserId}`, JSON.stringify(safeData));
+          // Also save email-keyed cache for cross-provider auth recovery
+          if (userEmail) {
+            localStorage.setItem(`vyaperi_reports_cache_email_${userEmail}`, JSON.stringify(safeData));
+          }
           sessionStorage.removeItem("vyaperi_reports_cache");
         } catch {}
 

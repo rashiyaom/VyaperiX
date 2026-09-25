@@ -942,14 +942,23 @@ async def get_video_call(call_id: str) -> Optional[dict]:
 
 async def list_video_calls(
     user_id: Optional[str] = None,
+    user_email: Optional[str] = None,
     limit: int = 100,
 ) -> List[dict]:
-    """List recent video calls for a user from MongoDB with memory fallback strictly isolated per user."""
-    clean_uid = _clean_user_id(user_id)
-    if not clean_uid:
+    """List recent video calls for a user from MongoDB, resolved across all auth provider aliases."""
+    all_uids = await _resolve_all_user_ids(user_id, user_email)
+    clean_email = (user_email or "").strip().lower()
+
+    or_clauses: List[Dict[str, Any]] = []
+    if all_uids:
+        or_clauses.append({"user_id": {"$in": all_uids}})
+    if clean_email:
+        or_clauses.append({"user_email": {"$regex": f"^{re.escape(clean_email)}$", "$options": "i"}})
+
+    if not or_clauses:
         return []
 
-    query: Dict[str, Any] = {"user_id": clean_uid}
+    query: Dict[str, Any] = {"$or": or_clauses} if len(or_clauses) > 1 else or_clauses[0]
 
     try:
         db = get_mongo_db()
@@ -958,7 +967,11 @@ async def list_video_calls(
         return [_clean_doc(d) for d in docs]
     except Exception as e:
         logger.warning(f"MongoDB list_video_calls error: {e}")
-        calls = [c for c in _in_memory_video_calls.values() if c.get("user_id") == clean_uid]
+        calls = [
+            c for c in _in_memory_video_calls.values()
+            if (c.get("user_id") in all_uids)
+            or (clean_email and (c.get("user_email") or "").strip().lower() == clean_email)
+        ]
         return calls[:limit]
 
 async def get_video_call_by_tavus_id(tavus_conversation_id: str) -> Optional[dict]:
