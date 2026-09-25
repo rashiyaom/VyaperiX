@@ -152,122 +152,148 @@ No conversational text.
         Full autonomous pipeline:
         DDG LinkedIn Discovery -> Apollo Firmographic Deep Enrichment -> Groq Fit Evaluation -> Storage.
         """
-        # Step 1: Determine queries
-        if custom_query and custom_query.strip():
-            queries = [custom_query.strip()]
-        else:
-            queries = self.generate_targeted_queries(offering, target_industry, region)
-
-        logger.info(f"Prospecting: Executing queries: {queries}")
-
-        # Step 2: DuckDuckGo search
-        raw_search_results = []
-        for q in queries:
-            try:
-                results = await self.ddg.search(q, max_results=max_results + 2)
-                raw_search_results.extend(results)
-            except Exception as e:
-                logger.warning(f"DDG search failed for query '{q}': {e}")
-
-        if not raw_search_results and not custom_query:
-            # Try a broader search
-            try:
-                fallback_q = f'"{target_industry}" companies {region} contact'
-                raw_search_results = await self.ddg.search(fallback_q, max_results=max_results)
-            except Exception as e:
-                logger.error(f"Fallback DDG search failed: {e}")
-
-        # Step 3: Parse and deduplicate companies
-        candidates: List[Dict[str, Any]] = []
+        # Step 1: Query Apollo Organization Search for verified real-world corporate records
+        apollo_leads: List[Dict[str, Any]] = []
         seen_names = set()
+        seen_domains = set()
 
-        for item in raw_search_results:
-            title = item.title
-            snippet = item.snippet
-            url = item.url
+        try:
+            keywords_to_search = [target_industry]
+            if offering:
+                clean_offering_words = [w for w in re.sub(r"[^a-zA-Z0-9\s]", "", offering).split() if len(w) > 3]
+                keywords_to_search.extend(clean_offering_words[:2])
 
-            # Extract company name
-            company_name = _parse_company_from_title(title)
-            slug = re.sub(r"[^a-z0-9]", "", company_name.lower())
-            if not slug or slug in seen_names:
-                continue
-            seen_names.add(slug)
-
-            # Extract emails and phone numbers from snippet
-            emails = _extract_emails(snippet)
-            phones = _extract_phone_numbers(snippet)
-
-            # Derive domain candidate
-            domain_candidate = ""
-            if emails:
-                domain_candidate = emails[0].split("@")[-1].strip()
-            if not domain_candidate or domain_candidate in ("gmail.com", "yahoo.com", "outlook.com", "hotmail.com"):
-                # Clean company name into domain slug
-                clean_slug = re.sub(r"[^a-zA-Z0-9]", "", company_name.split()[0]).lower()
-                domain_candidate = f"{clean_slug}.com"
-
-            candidates.append({
-                "raw_company": company_name,
-                "linkedin_url": url if "linkedin.com" in url else "",
-                "snippet": snippet,
-                "emails": emails,
-                "phones": phones,
-                "domain_candidate": domain_candidate,
-            })
-
-            if len(candidates) >= max_results:
-                break
-
-        # Step 4: Apollo Deep Enrichment (in parallel)
-        async def _enrich_candidate(c: Dict[str, Any]) -> Dict[str, Any]:
-            domain = c["domain_candidate"]
-            enrichment = await apollo_service.enrich_organization(domain)
-            # If not found or phone is missing, try raw company name domain
-            if not enrichment.get("found"):
-                alt_domain = clean_domain(f"{c['raw_company'].lower().replace(' ', '')}.com")
-                if alt_domain and alt_domain != domain:
-                    alt_enrich = await apollo_service.enrich_organization(alt_domain)
-                    if alt_enrich.get("found"):
-                        enrichment = alt_enrich
-
-            # Determine best phone
-            resolved_phone = (
-                enrichment.get("phone")
-                or (c["phones"][0] if c["phones"] else "")
+            raw_apollo = await apollo_service.search_organizations(
+                keywords=keywords_to_search,
+                location=region,
+                limit=max_results,
             )
+            for org in raw_apollo:
+                domain = org.get("domain") or ""
+                comp_name = org.get("name") or (domain.capitalize() if domain else "Lead Prospect")
+                name_slug = re.sub(r"[^a-z0-9]", "", comp_name.lower())
+                if name_slug in seen_names or (domain and domain in seen_domains):
+                    continue
+                seen_names.add(name_slug)
+                if domain:
+                    seen_domains.add(domain)
 
-            # Determine best email
-            resolved_email = (
-                c["emails"][0] if c["emails"]
-                else (f"info@{enrichment.get('domain')}" if enrichment.get("domain") else "contact@enterprise.com")
-            )
+                resolved_email = org.get("email") or (f"contact@{domain}" if domain else "contact@enterprise.com")
+                apollo_leads.append({
+                    "company": comp_name,
+                    "domain": domain,
+                    "phone": org.get("phone") or "",
+                    "email": resolved_email,
+                    "website": org.get("website_url") or (f"https://{domain}" if domain else ""),
+                    "linkedin_url": org.get("linkedin_url") or "",
+                    "employee_count": org.get("estimated_num_employees"),
+                    "annual_revenue": org.get("annual_revenue"),
+                    "industry": org.get("industry") or target_industry,
+                    "city": org.get("city") or "",
+                    "state": org.get("state") or "",
+                    "country": org.get("country") or region,
+                    "logo_url": org.get("logo_url") or "",
+                    "technologies": org.get("technologies") or [],
+                    "snippet": f"Verified Apollo Corporate Record: {org.get('industry') or target_industry} based in {org.get('city') or region}.",
+                    "apollo_found": True,
+                })
+        except Exception as apollo_err:
+            logger.warning(f"Apollo organization search error: {apollo_err}")
 
-            # Determine website
-            website = enrichment.get("website_url") or f"https://{c['domain_candidate']}"
+        # Step 2: If additional leads needed, supplement with DuckDuckGo LinkedIn discovery
+        ddg_enriched_leads: List[Dict[str, Any]] = []
+        if len(apollo_leads) < max_results:
+            needed = max_results - len(apollo_leads)
+            if custom_query and custom_query.strip():
+                queries = [custom_query.strip()]
+            else:
+                queries = self.generate_targeted_queries(offering, target_industry, region)
 
-            # Best LinkedIn URL
-            linkedin_url = enrichment.get("linkedin_url") or c["linkedin_url"]
+            raw_search_results = []
+            for q in queries:
+                try:
+                    results = await self.ddg.search(q, max_results=needed + 2)
+                    raw_search_results.extend(results)
+                except Exception as e:
+                    logger.warning(f"DDG search failed for query '{q}': {e}")
 
-            return {
-                "company": enrichment.get("name") or c["raw_company"],
-                "domain": enrichment.get("domain") or c["domain_candidate"],
-                "phone": resolved_phone,
-                "email": resolved_email,
-                "website": website,
-                "linkedin_url": linkedin_url,
-                "employee_count": enrichment.get("estimated_num_employees"),
-                "annual_revenue": enrichment.get("annual_revenue"),
-                "industry": enrichment.get("industry") or target_industry,
-                "city": enrichment.get("city") or "",
-                "state": enrichment.get("state") or "",
-                "country": enrichment.get("country") or region,
-                "logo_url": enrichment.get("logo_url") or "",
-                "technologies": enrichment.get("technologies") or [],
-                "snippet": c["snippet"],
-                "apollo_found": enrichment.get("found", False),
-            }
+            candidates: List[Dict[str, Any]] = []
+            for item in raw_search_results:
+                title = item.title
+                snippet = item.snippet
+                url = item.url
 
-        enriched_leads = await asyncio.gather(*[_enrich_candidate(c) for c in candidates])
+                company_name = _parse_company_from_title(title)
+                slug = re.sub(r"[^a-z0-9]", "", company_name.lower())
+                if not slug or slug in seen_names:
+                    continue
+                seen_names.add(slug)
+
+                emails = _extract_emails(snippet)
+                phones = _extract_phone_numbers(snippet)
+
+                domain_candidate = ""
+                if emails:
+                    domain_candidate = emails[0].split("@")[-1].strip()
+                if not domain_candidate or domain_candidate in ("gmail.com", "yahoo.com", "outlook.com", "hotmail.com"):
+                    clean_slug = re.sub(r"[^a-zA-Z0-9]", "", company_name.split()[0]).lower()
+                    domain_candidate = f"{clean_slug}.com"
+
+                candidates.append({
+                    "raw_company": company_name,
+                    "linkedin_url": url if "linkedin.com" in url else "",
+                    "snippet": snippet,
+                    "emails": emails,
+                    "phones": phones,
+                    "domain_candidate": domain_candidate,
+                })
+                if len(candidates) >= needed:
+                    break
+
+            async def _enrich_candidate(c: Dict[str, Any]) -> Dict[str, Any]:
+                domain = c["domain_candidate"]
+                enrichment = await apollo_service.enrich_organization(domain)
+                if not enrichment.get("found"):
+                    alt_domain = clean_domain(f"{c['raw_company'].lower().replace(' ', '')}.com")
+                    if alt_domain and alt_domain != domain:
+                        alt_enrich = await apollo_service.enrich_organization(alt_domain)
+                        if alt_enrich.get("found"):
+                            enrichment = alt_enrich
+
+                resolved_phone = (
+                    enrichment.get("phone")
+                    or (c["phones"][0] if c["phones"] else "")
+                )
+                resolved_email = (
+                    c["emails"][0] if c["emails"]
+                    else (f"contact@{enrichment.get('domain')}" if enrichment.get("domain") else "contact@enterprise.com")
+                )
+                website = enrichment.get("website_url") or f"https://{c['domain_candidate']}"
+                linkedin_url = enrichment.get("linkedin_url") or c["linkedin_url"]
+
+                return {
+                    "company": enrichment.get("name") or c["raw_company"],
+                    "domain": enrichment.get("domain") or c["domain_candidate"],
+                    "phone": resolved_phone,
+                    "email": resolved_email,
+                    "website": website,
+                    "linkedin_url": linkedin_url,
+                    "employee_count": enrichment.get("estimated_num_employees"),
+                    "annual_revenue": enrichment.get("annual_revenue"),
+                    "industry": enrichment.get("industry") or target_industry,
+                    "city": enrichment.get("city") or "",
+                    "state": enrichment.get("state") or "",
+                    "country": enrichment.get("country") or region,
+                    "logo_url": enrichment.get("logo_url") or "",
+                    "technologies": enrichment.get("technologies") or [],
+                    "snippet": c["snippet"],
+                    "apollo_found": enrichment.get("found", False),
+                }
+
+            if candidates:
+                ddg_enriched_leads = await asyncio.gather(*[_enrich_candidate(c) for c in candidates])
+
+        enriched_leads = list(apollo_leads) + list(ddg_enriched_leads)
 
         # Step 5: Groq ICP Fit Evaluation & Personalized Pitch Generation
         final_leads: List[Dict[str, Any]] = []

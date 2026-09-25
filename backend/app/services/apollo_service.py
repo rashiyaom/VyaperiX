@@ -189,6 +189,113 @@ class ApolloService:
             "keywords": [],
         }
 
+    async def search_organizations(
+        self,
+        keywords: Any,
+        location: Optional[str] = None,
+        limit: int = 10,
+    ) -> List[Dict[str, Any]]:
+        """
+        Directly query Apollo.io organizations/search API.
+        Retrieves authentic corporate profiles, verified switchboard phones, domains, and locations.
+        """
+        if not self.api_key:
+            logger.warning("Apollo: APOLLO_API_KEY not configured for search.")
+            return []
+
+        keyword_list = [keywords] if isinstance(keywords, str) else list(keywords or [])
+        tags = [k.strip() for k in keyword_list if k and len(k.strip()) > 1][:4]
+
+        url = f"{APOLLO_API_BASE}/organizations/search"
+        headers = {
+            "Content-Type": "application/json",
+            "Cache-Control": "no-cache",
+            "X-Api-Key": self.api_key,
+        }
+
+        payload: Dict[str, Any] = {
+            "page": 1,
+            "per_page": min(max(limit, 3), 25),
+        }
+        if tags:
+            payload["q_organization_keyword_tags"] = tags
+        if location and location.strip() and location.strip().lower() != "global":
+            payload["organization_locations"] = [location.strip()]
+
+        try:
+            async with httpx.AsyncClient(timeout=12.0) as client:
+                resp = await client.post(url, headers=headers, json=payload)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    orgs = data.get("organizations") or []
+                    results: List[Dict[str, Any]] = []
+
+                    for org in orgs:
+                        primary_domain = org.get("primary_domain") or ""
+                        if not primary_domain and org.get("website_url"):
+                            try:
+                                primary_domain = org["website_url"].replace("https://", "").replace("http://", "").split("/")[0].replace("www.", "")
+                            except Exception:
+                                pass
+
+                        primary_phone_obj = org.get("primary_phone") or {}
+                        phone = (
+                            primary_phone_obj.get("sanitized_number")
+                            or primary_phone_obj.get("number")
+                            or org.get("sanitized_phone")
+                            or org.get("phone")
+                            or ""
+                        )
+                        if phone and not re.search(r"\d{5,}", phone):
+                            phone = ""
+
+                        tech_list = []
+                        for t in (org.get("current_technologies") or []):
+                            if isinstance(t, dict) and t.get("name"):
+                                tech_list.append(str(t["name"]))
+                            elif isinstance(t, str):
+                                tech_list.append(t)
+
+                        domain = primary_domain
+                        contact_email = f"contact@{domain}" if domain else ""
+                        sales_email = f"sales@{domain}" if domain else ""
+
+                        item = {
+                            "found": True,
+                            "apollo_id": org.get("id"),
+                            "name": org.get("name") or (domain.capitalize() if domain else "Lead Prospect"),
+                            "domain": domain,
+                            "website_url": org.get("website_url") or (f"https://{domain}" if domain else ""),
+                            "linkedin_url": org.get("linkedin_url") or "",
+                            "twitter_url": org.get("twitter_url") or "",
+                            "facebook_url": org.get("facebook_url") or "",
+                            "phone": phone,
+                            "email": contact_email,
+                            "sales_email": sales_email,
+                            "estimated_num_employees": org.get("estimated_num_employees"),
+                            "annual_revenue": org.get("organization_revenue_printed") or org.get("annual_revenue_printed") or org.get("annual_revenue"),
+                            "industry": org.get("industry") or "",
+                            "city": org.get("city") or "",
+                            "state": org.get("state") or "",
+                            "country": org.get("country") or (location or "India"),
+                            "raw_address": org.get("raw_address") or "",
+                            "logo_url": org.get("logo_url") or "",
+                            "technologies": tech_list[:10],
+                            "keywords": (org.get("keywords") or [])[:8],
+                        }
+                        results.append(item)
+                        if domain:
+                            _ENRICH_CACHE[domain] = item
+
+                    logger.info(f"Apollo: Discovered {len(results)} verified organizations for {tags} in {location}")
+                    return results
+                else:
+                    logger.warning(f"Apollo: organizations/search returned HTTP {resp.status_code}: {resp.text[:200]}")
+                    return []
+        except Exception as e:
+            logger.error(f"Apollo: Exception during organizations/search: {e}")
+            return []
+
 
 # Global singleton instance
 apollo_service = ApolloService()

@@ -97,12 +97,20 @@ export function LeadRadarModule({
   const [whatsAppingLeadId, setWhatsAppingLeadId] = useState<string | null>(null);
   const [syncingCrmLeadId, setSyncingCrmLeadId] = useState<string | null>(null);
   const [syncedCrmLeadIds, setSyncedCrmLeadIds] = useState<Record<string, { deal_id?: string; contact_id?: string }>>({});
-  const [actionSuccessMsg, setActionSuccessMsg] = useState<{ leadId: string; text: string; type: "call" | "whatsapp" } | null>(null);
+  const [actionSuccessMsg, setActionSuccessMsg] = useState<{ leadId: string; text: string; type: "call" | "whatsapp" | "email" } | null>(null);
   const [actionErrorMsg, setActionErrorMsg] = useState<{ leadId: string; text: string } | null>(null);
 
   // Phone Override Modal / Inline Edit
   const [editingPhoneLeadId, setEditingPhoneLeadId] = useState<string | null>(null);
   const [customPhoneInput, setCustomPhoneInput] = useState<string>("");
+
+  // Email Override & Dispatch State
+  const [editingEmailLeadId, setEditingEmailLeadId] = useState<string | null>(null);
+  const [customEmailInput, setCustomEmailInput] = useState<string>("");
+  const [emailingLead, setEmailingLead] = useState<Lead | null>(null);
+  const [emailSubject, setEmailSubject] = useState<string>("");
+  const [emailBody, setEmailBody] = useState<string>("");
+  const [isSendingEmail, setIsSendingEmail] = useState<boolean>(false);
 
   // Domain Quick Test
   const [quickDomain, setQuickDomain] = useState<string>("orientbell.com");
@@ -144,8 +152,8 @@ export function LeadRadarModule({
             why_matched: l.why_matched || "Verified matching commercial profile",
             personalized_pitch: l.personalized_pitch || `Commercial inquiry for ${l.company || "enterprise"}`,
             website: l.website || (l.domain ? `https://${l.domain}` : ""),
-            email: l.email || "procurement@" + (l.domain || "enterprise.com"),
-            phone: l.phone || "+91 9727662885",
+            email: l.email || (l.domain ? `contact@${l.domain}` : "procurement@enterprise.com"),
+            phone: l.phone || "",
             status: l.status || "new",
             linkedin_url: l.linkedin_url,
             employee_count: l.employee_count,
@@ -179,21 +187,23 @@ export function LeadRadarModule({
           signalsList.push(`Active ICP requirement for ${effectiveCompanyName}`);
         }
 
+        const domainCandidate = `${(cust.segment_name || "enterprise").toLowerCase().replace(/[^a-z0-9]/g, "")}.com`;
+
         return {
           id: `icp-segment-${idx + 1}`,
           name: `${cust.segment_name} Commercial Team`,
           title: cust.description || `Commercial Buyer Segment (${cust.segment_name})`,
           company: `${cust.segment_name} Group`,
-          domain: `${(cust.segment_name || "enterprise").toLowerCase().replace(/[^a-z0-9]/g, "")}.com`,
+          domain: domainCandidate,
           industry: effectiveIndustry || "B2B Commercial",
           intentScore: computedScore,
           dealSize: cust.estimated_deal_size || "₹5L - ₹10L / yr",
           signals: signalsList,
           why_matched: `Target commercial segment matching ${effectiveCompanyName}'s core products.`,
           personalized_pitch: `Hi ${cust.segment_name} team, noticing your market expansion, our AI platform helps automate your B2B sales pipeline.`,
-          website: `https://${(cust.segment_name || "enterprise").toLowerCase().replace(/[^a-z0-9]/g, "")}.com`,
-          email: "procurement@enterprise.com",
-          phone: "+91 9727662885", // user's demo phone pre-set for test dispatch
+          website: `https://${domainCandidate}`,
+          email: `contact@${domainCandidate}`,
+          phone: "", // Click 'Launch Apollo Market Radar' to fetch real verified phones
           status: "new",
         };
       });
@@ -292,12 +302,19 @@ export function LeadRadarModule({
 
   // 1-Click Outbound Voice SDR Call via Vapi
   const handleTriggerCall = async (lead: Lead) => {
+    let phoneToUse = (lead.phone || "").trim();
+    if (!phoneToUse) {
+      const input = window.prompt(`Enter direct phone number to call for ${lead.company}:`, "+91");
+      if (!input || !input.trim()) return;
+      phoneToUse = input.trim();
+      handleSavePhone(lead.id, phoneToUse);
+    }
+
     setCallingLeadId(lead.id);
     setActionSuccessMsg(null);
     setActionErrorMsg(null);
 
     try {
-      const phoneToUse = lead.phone || "+919727662885";
       const res = await fetch(`${API_BASE}/api/prospecting/leads/${lead.id}/call`, {
         method: "POST",
         headers: getAuthHeaders(session?.access_token),
@@ -333,12 +350,19 @@ export function LeadRadarModule({
 
   // 1-Click WhatsApp Intro Dispatch with Jitsi Meeting Link
   const handleTriggerWhatsApp = async (lead: Lead) => {
+    let phoneToUse = (lead.phone || "").trim();
+    if (!phoneToUse) {
+      const input = window.prompt(`Enter WhatsApp phone number with country code for ${lead.company}:`, "+91");
+      if (!input || !input.trim()) return;
+      phoneToUse = input.trim();
+      handleSavePhone(lead.id, phoneToUse);
+    }
+
     setWhatsAppingLeadId(lead.id);
     setActionSuccessMsg(null);
     setActionErrorMsg(null);
 
     try {
-      const phoneToUse = lead.phone || "+919727662885";
       const res = await fetch(`${API_BASE}/api/prospecting/leads/${lead.id}/whatsapp`, {
         method: "POST",
         headers: getAuthHeaders(session?.access_token),
@@ -369,14 +393,71 @@ export function LeadRadarModule({
   };
 
   // Save phone number edit
-  const handleSavePhone = (leadId: string) => {
-    if (customPhoneInput.trim()) {
+  const handleSavePhone = (leadId: string, overrideValue?: string) => {
+    const val = (overrideValue ?? customPhoneInput).trim();
+    if (val) {
       setLeads((prev) =>
-        prev.map((item) => (item.id === leadId ? { ...item, phone: customPhoneInput.trim() } : item))
+        prev.map((item) => (item.id === leadId ? { ...item, phone: val } : item))
       );
     }
     setEditingPhoneLeadId(null);
     setCustomPhoneInput("");
+  };
+
+  // Save email address edit
+  const handleSaveEmail = (leadId: string, overrideValue?: string) => {
+    const val = (overrideValue ?? customEmailInput).trim();
+    if (val) {
+      setLeads((prev) =>
+        prev.map((item) => (item.id === leadId ? { ...item, email: val } : item))
+      );
+    }
+    setEditingEmailLeadId(null);
+    setCustomEmailInput("");
+  };
+
+  // Open Email Pitch Modal
+  const handleOpenEmailModal = (lead: Lead) => {
+    setEmailingLead(lead);
+    setEmailSubject(`Commercial Synergy: ${effectiveCompanyName || "VyaperiX"} x ${lead.company}`);
+    setEmailBody(lead.personalized_pitch || `Hi ${lead.company} team,\n\nNoticing your recent market expansion, our AI platform helps automate your B2B sales and procurement workflows.\n\nWould you be open to a brief 10-minute discovery conversation this week?`);
+  };
+
+  // Dispatch Email Pitch
+  const handleSendEmailPitch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!emailingLead) return;
+    setIsSendingEmail(true);
+    setActionSuccessMsg(null);
+    setActionErrorMsg(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/email/send-pitch`, {
+        method: "POST",
+        headers: getAuthHeaders(session?.access_token),
+        body: JSON.stringify({
+          to_email: emailingLead.email,
+          company_name: emailingLead.company,
+          lead_name: emailingLead.name || `${emailingLead.company} Commercial Team`,
+          subject: emailSubject,
+          pitch_text: emailBody,
+          sender_company: effectiveCompanyName || "VyaperiX",
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.detail || data.error || "Email dispatch failed");
+      }
+      setActionSuccessMsg({
+        leadId: emailingLead.id,
+        text: `B2B pitch email sent to ${emailingLead.email}!`,
+        type: "email",
+      });
+      setEmailingLead(null);
+    } catch (err: any) {
+      setActionErrorMsg({ leadId: emailingLead.id, text: `Email failed: ${err.message}` });
+    } finally {
+      setIsSendingEmail(false);
+    }
   };
 
   // 1-Click Sync to HubSpot CRM
@@ -895,54 +976,122 @@ export function LeadRadarModule({
                   ))}
                 </div>
 
-                {/* Bottom Action Footer */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-t border-ink/10 pt-3">
-                  {/* Phone Display & Quick Override */}
-                  <div className="flex items-center gap-2 font-mono text-xs">
-                    <span className="text-muted-foreground">Dial Target:</span>
-                    {isEditingPhone ? (
-                      <div className="flex items-center gap-1">
-                        <input
-                          type="text"
-                          value={customPhoneInput}
-                          onChange={(e) => setCustomPhoneInput(e.target.value)}
-                          placeholder="+91..."
-                          className="px-2 py-1 border border-ink/20 bg-paper text-xs font-mono w-36"
-                          autoFocus
-                        />
-                        <button
-                          onClick={() => handleSavePhone(lead.id)}
-                          className="border border-lime bg-lime text-lime-foreground p-1 text-[10px]"
-                        >
-                          <Check className="w-3 h-3" />
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-bold text-ink bg-secondary px-2 py-0.5 border border-ink/10">
-                          {lead.phone || "No direct phone"}
-                        </span>
-                        <button
-                          onClick={() => {
-                            setEditingPhoneLeadId(lead.id);
-                            setCustomPhoneInput(lead.phone || "+919727662885");
-                          }}
-                          title="Override phone for live testing"
-                          className="text-muted-foreground hover:text-violet p-1"
-                        >
-                          <Edit2 className="w-3 h-3" />
-                        </button>
-                      </div>
+                {/* Bottom Action Footer: Contact Credentials & Multi-Channel Actions */}
+                <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3 border-t border-ink/10 pt-3">
+                  {/* Contact Credentials: Phone & Email Display with Quick Overrides */}
+                  <div className="flex flex-wrap items-center gap-3 text-xs font-mono">
+                    {/* Phone Display */}
+                    <div className="flex items-center gap-1.5">
+                      <Phone className="w-3.5 h-3.5 text-muted-foreground" />
+                      <span className="text-muted-foreground">Phone:</span>
+                      {isEditingPhone ? (
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="text"
+                            value={customPhoneInput}
+                            onChange={(e) => setCustomPhoneInput(e.target.value)}
+                            placeholder="+91..."
+                            className="px-2 py-0.5 border border-ink/20 bg-paper text-xs font-mono w-32"
+                            autoFocus
+                          />
+                          <button
+                            onClick={() => handleSavePhone(lead.id)}
+                            className="border border-lime bg-lime text-lime-foreground p-1 text-[10px] cursor-pointer"
+                          >
+                            <Check className="w-3 h-3" />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1">
+                          <span className={`px-2 py-0.5 border border-ink/10 ${lead.phone ? "font-bold text-ink bg-secondary" : "text-muted-foreground italic bg-secondary/50"}`}>
+                            {lead.phone || "No phone listed"}
+                          </span>
+                          <button
+                            onClick={() => {
+                              setEditingPhoneLeadId(lead.id);
+                              setCustomPhoneInput(lead.phone || "");
+                            }}
+                            title="Edit phone number"
+                            className="text-muted-foreground hover:text-violet p-1 cursor-pointer"
+                          >
+                            <Edit2 className="w-3 h-3" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Email Display */}
+                    <div className="flex items-center gap-1.5">
+                      <Mail className="w-3.5 h-3.5 text-muted-foreground" />
+                      <span className="text-muted-foreground">Email:</span>
+                      {editingEmailLeadId === lead.id ? (
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="email"
+                            value={customEmailInput}
+                            onChange={(e) => setCustomEmailInput(e.target.value)}
+                            placeholder="contact@company.com"
+                            className="px-2 py-0.5 border border-ink/20 bg-paper text-xs font-mono w-44"
+                            autoFocus
+                          />
+                          <button
+                            onClick={() => handleSaveEmail(lead.id)}
+                            className="border border-lime bg-lime text-lime-foreground p-1 text-[10px] cursor-pointer"
+                          >
+                            <Check className="w-3 h-3" />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1">
+                          <span className={`px-2 py-0.5 border border-ink/10 ${lead.email ? "text-ink bg-secondary" : "text-muted-foreground italic bg-secondary/50"}`}>
+                            {lead.email || "No email listed"}
+                          </span>
+                          <button
+                            onClick={() => {
+                              setEditingEmailLeadId(lead.id);
+                              setCustomEmailInput(lead.email || "");
+                            }}
+                            title="Edit email address"
+                            className="text-muted-foreground hover:text-violet p-1 cursor-pointer"
+                          >
+                            <Edit2 className="w-3 h-3" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Website Link */}
+                    {lead.website && (
+                      <a
+                        href={lead.website.startsWith("http") ? lead.website : `https://${lead.website}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-[11px] font-mono text-violet hover:underline flex items-center gap-1"
+                      >
+                        <Globe className="w-3 h-3" />
+                        {lead.domain || "Website"}
+                        <ExternalLink className="w-2.5 h-2.5" />
+                      </a>
                     )}
                   </div>
 
                   {/* Real Live Action Buttons */}
                   <div className="flex flex-wrap items-center gap-2">
+                    {/* Email Pitch Button */}
+                    <button
+                      onClick={() => handleOpenEmailModal(lead)}
+                      className="border border-ink/30 bg-paper px-3 py-2 label-mono text-xs font-bold text-ink hover:border-violet hover:bg-violet/10 transition-all flex items-center gap-1.5 cursor-pointer"
+                      title="Send personalized B2B outreach email pitch"
+                    >
+                      <Mail className="w-3.5 h-3.5 text-violet" />
+                      Send Email Pitch
+                    </button>
+
                     {/* WhatsApp Button */}
                     <button
                       onClick={() => handleTriggerWhatsApp(lead)}
                       disabled={isWhatsApping}
-                      className="border border-ink/30 bg-paper px-3 py-2 label-mono text-xs font-bold text-ink hover:border-lime hover:bg-lime/10 transition-all flex items-center gap-1.5"
+                      className="border border-ink/30 bg-paper px-3 py-2 label-mono text-xs font-bold text-ink hover:border-lime hover:bg-lime/10 transition-all flex items-center gap-1.5 cursor-pointer"
                     >
                       <MessageSquare className={`w-3.5 h-3.5 text-lime-700 dark:text-lime ${isWhatsApping ? "animate-spin" : ""}`} />
                       {isWhatsApping ? "Sending..." : "Send WhatsApp Pitch"}
@@ -952,7 +1101,7 @@ export function LeadRadarModule({
                     <button
                       onClick={() => handleSyncToCRM(lead)}
                       disabled={syncingCrmLeadId === lead.id}
-                      className={`border px-3 py-2 label-mono text-xs font-bold transition-all flex items-center gap-1.5 ${
+                      className={`border px-3 py-2 label-mono text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
                         syncedCrmLeadIds[lead.id]
                           ? "border-violet/40 bg-violet/10 text-violet"
                           : "border-ink/30 bg-paper text-ink hover:border-violet hover:bg-violet/5"
@@ -971,7 +1120,7 @@ export function LeadRadarModule({
                     <button
                       onClick={() => handleTriggerCall(lead)}
                       disabled={isCalling}
-                      className={`border px-3.5 py-2 label-mono text-xs font-bold flex items-center gap-2 transition-all ${
+                      className={`border px-3.5 py-2 label-mono text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
                         lead.status === "in_call"
                           ? "border-lime bg-lime text-lime-foreground font-black animate-pulse"
                           : "border-ink bg-ink text-paper hover:bg-violet hover:border-violet"
@@ -1027,6 +1176,94 @@ export function LeadRadarModule({
           >
             <Zap className="w-3.5 h-3.5 text-lime" /> Launch Fleet Campaign
           </button>
+        </div>
+      )}
+
+      {/* Email Pitch Modal */}
+      {emailingLead && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
+          <div className="bg-paper border border-ink/20 shadow-2xl max-w-lg w-full p-6 space-y-4 rounded-xl text-foreground">
+            <div className="flex items-center justify-between border-b border-ink/10 pb-3">
+              <div className="flex items-center gap-2">
+                <Mail className="w-5 h-5 text-violet" />
+                <h3 className="font-display font-bold text-base uppercase">Dispatch B2B Email Pitch</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEmailingLead(null)}
+                className="text-muted-foreground hover:text-ink text-xs font-mono px-2 py-1 border border-ink/10 hover:border-ink cursor-pointer"
+              >
+                ✕ Close
+              </button>
+            </div>
+
+            <form onSubmit={handleSendEmailPitch} className="space-y-3 font-mono text-xs">
+              <div>
+                <label className="text-muted-foreground block mb-1">Target Organization:</label>
+                <div className="font-bold text-ink bg-secondary p-2 border border-ink/10">
+                  {emailingLead.company} ({emailingLead.domain || "Verified Corporate Record"})
+                </div>
+              </div>
+
+              <div>
+                <label className="text-muted-foreground block mb-1">Recipient Business Email:</label>
+                <input
+                  type="email"
+                  required
+                  value={emailingLead.email}
+                  onChange={(e) => {
+                    const newEmail = e.target.value;
+                    setEmailingLead((prev) => (prev ? { ...prev, email: newEmail } : null));
+                    handleSaveEmail(emailingLead.id, newEmail);
+                  }}
+                  className="w-full px-3 py-2 border border-ink/20 bg-background font-mono text-xs focus:border-violet outline-none"
+                  placeholder="contact@company.com"
+                />
+              </div>
+
+              <div>
+                <label className="text-muted-foreground block mb-1">Subject Line:</label>
+                <input
+                  type="text"
+                  required
+                  value={emailSubject}
+                  onChange={(e) => setEmailSubject(e.target.value)}
+                  className="w-full px-3 py-2 border border-ink/20 bg-background font-mono text-xs focus:border-violet outline-none"
+                  placeholder="Subject line..."
+                />
+              </div>
+
+              <div>
+                <label className="text-muted-foreground block mb-1">Personalized Value Proposition & Proposal:</label>
+                <textarea
+                  rows={6}
+                  required
+                  value={emailBody}
+                  onChange={(e) => setEmailBody(e.target.value)}
+                  className="w-full p-3 border border-ink/20 bg-background font-mono text-xs focus:border-violet outline-none resize-none leading-relaxed"
+                  placeholder="Write message..."
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEmailingLead(null)}
+                  className="px-3 py-2 border border-ink/20 hover:bg-secondary font-mono text-xs cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSendingEmail}
+                  className="px-4 py-2 border border-violet bg-violet text-white font-bold text-xs flex items-center gap-1.5 hover:bg-violet/90 transition-all disabled:opacity-50 cursor-pointer"
+                >
+                  <Send className={`w-3.5 h-3.5 ${isSendingEmail ? "animate-spin" : ""}`} />
+                  {isSendingEmail ? "Dispatching..." : "Send B2B Pitch Now"}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>

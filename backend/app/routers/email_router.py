@@ -301,3 +301,85 @@ async def send_test_email(
         "result": res,
         "recipient": target_email,
     }
+
+
+class SendPitchEmailRequest(BaseModel):
+    to_email: str = Field(..., description="Target prospect email address")
+    company_name: str = Field(..., description="Prospect company name")
+    lead_name: Optional[str] = Field("Commercial Procurement Team", description="Recipient lead/contact name")
+    subject: Optional[str] = Field(None, description="Custom email subject line")
+    pitch_text: str = Field(..., min_length=5, description="Personalized pitch or value proposition")
+    sender_name: Optional[str] = Field(None, description="Sender name (defaults to user display name)")
+    sender_company: Optional[str] = Field(None, description="Sender company (defaults to user business name)")
+
+
+@router.post("/send-pitch", summary="Dispatch Direct B2B Email Pitch to Lead")
+async def send_lead_pitch(
+    payload: SendPitchEmailRequest,
+    authorization: Optional[str] = Header(None),
+):
+    """
+    Sends a high-converting personalized B2B outreach email directly to a discovered company lead.
+    """
+    auth_user = await _resolve_auth_user(authorization)
+    sender_name = payload.sender_name
+    sender_company = payload.sender_company
+
+    if auth_user and auth_user.user_metadata:
+        if not sender_name:
+            sender_name = auth_user.user_metadata.get("full_name") or auth_user.user_metadata.get("name")
+        if not sender_company:
+            sender_company = auth_user.user_metadata.get("company_name") or auth_user.user_metadata.get("company")
+
+    sender_name = sender_name or "Commercial Director"
+    sender_company = sender_company or "VyaperiX"
+
+    subject = payload.subject or f"Exploring Synergy: {sender_company} x {payload.company_name}"
+
+    html = f"""<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #0d0f17; color: #f4f4f5;">
+  <div style="max-width: 600px; margin: 30px auto; background-color: #161926; border: 1px solid #2a2e42; border-radius: 12px; overflow: hidden; padding: 32px;">
+    <div style="border-bottom: 1px solid #2a2e42; padding-bottom: 16px; margin-bottom: 24px;">
+      <span style="font-size: 11px; font-weight: bold; letter-spacing: 0.1em; color: #a855f7; text-transform: uppercase;">Direct Commercial Inquiry</span>
+      <h2 style="margin: 6px 0 0 0; color: #ffffff; font-size: 20px;">{sender_company} &rarr; {payload.company_name}</h2>
+    </div>
+
+    <p style="font-size: 15px; color: #e4e4e7; line-height: 1.6; margin-bottom: 16px;">
+      Hello {payload.lead_name or 'Team'},
+    </p>
+
+    <div style="background-color: #1e2235; border-left: 3px solid #8b5cf6; padding: 16px; border-radius: 6px; margin: 20px 0; font-size: 14px; line-height: 1.6; color: #e4e4e7;">
+      {payload.pitch_text.replace(chr(10), '<br/>')}
+    </div>
+
+    <p style="font-size: 14px; color: #a1a1aa; line-height: 1.6;">
+      Would your team be open to a brief 10-minute discovery conversation this week to discuss how we can support your commercial objectives?
+    </p>
+
+    <div style="margin-top: 32px; padding-top: 20px; border-top: 1px solid #2a2e42; font-size: 13px; color: #71717a;">
+      <strong style="color: #ffffff;">{sender_name}</strong><br/>
+      {sender_company}
+    </div>
+  </div>
+</body>
+</html>"""
+
+    res = await email_service.send_email(
+        to_email=payload.to_email.strip(),
+        subject=subject,
+        html_content=html,
+        text_content=f"{payload.pitch_text}\n\nBest regards,\n{sender_name}\n{sender_company}",
+        from_name=sender_name,
+    )
+
+    return {
+        "success": res.get("status") in ("sent", "mocked"),
+        "status": res.get("status"),
+        "recipient": payload.to_email.strip(),
+        "subject": subject,
+        "message": "B2B pitch email dispatched successfully.",
+        "result": res,
+    }
+
