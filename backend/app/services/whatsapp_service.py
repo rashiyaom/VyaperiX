@@ -244,3 +244,65 @@ async def send_requirements_summary(
 
     full_message = "\n".join(lines)
     return await send_whatsapp_message(phone=customer_phone, text=full_message)
+
+
+async def send_meeting_confirmation_with_calendly(
+    customer_name: str,
+    customer_phone: str,
+    business_name: str,
+    start_time: str,
+    meet_url: str,
+    calendly_link: Optional[str] = None,
+    agenda: Optional[str] = None,
+    requirements: Optional[str] = None,
+) -> dict:
+    """
+    Sends a meeting confirmation. If a Calendly link is provided, it is featured
+    prominently so the customer can self-pick their preferred time slot.
+    Falls back to Jitsi / video room link when no Calendly link is configured.
+    """
+    c_name = (customer_name or "there").strip()
+    b_name = (business_name or "our team").strip()
+    formatted_time = format_meeting_time(start_time)
+
+    lines = [
+        f"नमस्ते / Hello {c_name}! 🎉",
+        "",
+        f"Thank you for speaking with *{b_name}* today! Our team has reviewed your request and confirmed your meeting.",
+        "",
+    ]
+
+    if calendly_link:
+        lines += [
+            "📅 *Book Your Preferred Time Slot:*",
+            f"{calendly_link}",
+            "_(Tap the link above to pick a time that works best for you — no app required!)_",
+            "",
+            f"📌 *Proposed Slot:* {formatted_time}",
+        ]
+    else:
+        lines += [
+            f"📅 *Date & Time:* {formatted_time}",
+            "🎥 *Live Video Meeting Room:*",
+            f"{meet_url}",
+            "_(Click link above to join from mobile or PC. No app download required!)_",
+        ]
+
+    if agenda:
+        clean_agenda = agenda.strip()
+        lines.extend(["", f"📋 *Discussion Agenda:*\n{clean_agenda}"])
+
+    if requirements:
+        clean_req = requirements.strip()
+        lines.extend(["", f"📌 *Key Requirements from Call:*\n_{clean_req}_"])
+
+    lines.extend([
+        "",
+        "💡 *Tip:* Join 2 minutes early with your camera and mic enabled.",
+        "",
+        "Reply to this WhatsApp message anytime if you have questions.",
+        f"— Team *{b_name}*",
+    ])
+
+    full_message = "\n".join(lines)
+    return await send_whatsapp_message(phone=customer_phone, text=full_message)

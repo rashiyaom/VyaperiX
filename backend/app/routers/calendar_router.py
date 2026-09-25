@@ -23,6 +23,7 @@ from app.core import database as db
 from app.services import calendar_service
 from app.services import sms_service
 from app.services import email_service
+from app.services import calendly_service
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +53,7 @@ class CreateCalendarEventRequest(BaseModel):
 
 
 class UpdateCalendarEventRequest(BaseModel):
-    status: Optional[str] = Field(None, description="'scheduled' | 'completed' | 'cancelled'")
+    status: Optional[str] = Field(None, description="'scheduled' | 'completed' | 'cancelled' | 'confirmed'")
     title: Optional[str] = None
     description: Optional[str] = None
     start_time: Optional[str] = None
@@ -60,6 +61,7 @@ class UpdateCalendarEventRequest(BaseModel):
     reminder_minutes: Optional[int] = None
     remind_via: Optional[str] = None
     meet_url: Optional[str] = None
+    calendly_link: Optional[str] = None
 
 
 async def _resolve_rep_phone(user_id: Optional[str]) -> str:
@@ -545,9 +547,9 @@ async def approve_and_send_whatsapp(
     Sales Agent 'Tick to Approve' workflow:
     1. Confirms the booking status from 'new_booking' to 'confirmed'.
     2. Allows the sales agent to optionally adjust the slot time (e.g. if resolving a conflict).
-    3. Guarantees an active, live Jitsi Meet video room link.
-    4. Automatically dispatches the WhatsApp meeting invitation with live video room, time slot,
-       and full call transcript requirements recap directly to the customer.
+    3. Resolves the Calendly booking link (from settings) to include in the customer notification.
+    4. Dispatches WhatsApp + SMS to the customer with the Calendly self-booking link.
+    5. Saves the Calendly link on the calendar event so the agent can tap it from the dashboard.
     """
     event = await db.get_calendar_event(event_id)
     if not event:
@@ -580,6 +582,18 @@ async def approve_and_send_whatsapp(
         )
         updates["meet_url"] = meet_url
 
+    # ── Resolve Calendly booking link ────────────────────────────────────────
+    calendly_link = None
+    try:
+        calendly_link = await calendly_service.get_primary_booking_link()
+    except Exception as cal_err:
+        logger.warning(f"Could not resolve Calendly booking link: {cal_err}")
+
+    if calendly_link:
+        updates["calendly_link"] = calendly_link
+        updates["calendly_link_sent_at"] = datetime.now(timezone.utc).isoformat()
+        updates["calendly_booked"] = updates.get("calendly_booked", False)
+
     # Check recipient phone number
     target_phone = updates.get("customer_phone") or event.get("customer_phone")
     if not target_phone:
@@ -588,18 +602,19 @@ async def approve_and_send_whatsapp(
             detail="Cannot dispatch WhatsApp: No customer phone number associated with this booking."
         )
 
-    # Format and send rich WhatsApp message
+    # Format and send rich WhatsApp message with Calendly link
     from app.services import whatsapp_service
     start_time_to_send = updates.get("start_time") or event.get("start_time") or ""
     agenda_to_send = event.get("agenda") or event.get("description") or ""
     requirements_to_send = updates.get("notes") or event.get("notes") or ""
 
-    wa_res = await whatsapp_service.send_meeting_confirmation(
+    wa_res = await whatsapp_service.send_meeting_confirmation_with_calendly(
         customer_name=event.get("customer_name") or "there",
         customer_phone=target_phone,
         business_name=event.get("company_name") or "Vyepari X",
         start_time=start_time_to_send,
         meet_url=meet_url,
+        calendly_link=calendly_link,
         agenda=agenda_to_send,
         requirements=requirements_to_send,
     )
@@ -613,12 +628,47 @@ async def approve_and_send_whatsapp(
             "error": f"Booking confirmed, but WhatsApp failed to send: {wa_res.get('error')}",
             "event_id": event_id,
             "meet_url": meet_url,
+            "calendly_link": calendly_link,
         }
 
     updates["whatsapp_status"] = "sent"
     updates["whatsapp_sent_at"] = datetime.now(timezone.utc).isoformat()
 
-    # Also dispatch meeting confirmation email to workspace owner, rep, and customer
+    # ── SMS notification with Calendly link ──────────────────────────────────
+    try:
+        rep_phone = await _resolve_rep_phone(event.get("user_id"))
+        meeting_time_str = str(start_time_to_send)
+        try:
+            dt = datetime.fromisoformat(meeting_time_str.replace("Z", "+00:00"))
+            formatted_time = dt.strftime("%Y-%m-%d %H:%M")
+        except Exception:
+            formatted_time = meeting_time_str
+
+        if await _sms_alerts_enabled(event.get("user_id")):
+            sms_body = (
+                f"[VyaperiX] Booking confirmed for {event.get('customer_name', 'Lead')}."
+                f" Time: {formatted_time}."
+            )
+            if calendly_link:
+                sms_body += f" Book slot: {calendly_link}"
+            elif meet_url:
+                sms_body += f" Video: {meet_url}"
+            sms_service.send_sms(rep_phone, sms_body)
+            # Also SMS the customer with Calendly link
+            if target_phone:
+                customer_sms = (
+                    f"Hello {event.get('customer_name', 'there')}! "
+                    f"Your meeting with {event.get('company_name', 'our team')} is confirmed."
+                )
+                if calendly_link:
+                    customer_sms += f" Pick your preferred time here: {calendly_link}"
+                elif meet_url:
+                    customer_sms += f" Join here: {meet_url}"
+                sms_service.send_sms(target_phone, customer_sms)
+    except Exception as sms_err:
+        logger.warning(f"SMS notification failed during booking approval: {sms_err}")
+
+    # ── Email notification ───────────────────────────────────────────────────
     try:
         owner_email = await email_service.resolve_workspace_owner_email(event.get("user_id"))
         rep_email = await email_service.resolve_user_registered_email(event.get("user_id"))
@@ -629,7 +679,7 @@ async def approve_and_send_whatsapp(
                 prospect_email=customer_email,
                 lead_name=event.get("customer_name") or "Valued Partner",
                 meeting_time=start_time_to_send,
-                meeting_link=meet_url,
+                meeting_link=calendly_link or meet_url,
                 title=event.get("title") or "Confirmed Discovery Session",
                 agenda=agenda_to_send,
                 customer_phone=target_phone,
@@ -649,8 +699,9 @@ async def approve_and_send_whatsapp(
 
     return {
         "success": True,
-        "message": f"✓ Booking confirmed and notifications dispatched with Live Video link!",
+        "message": "✓ Booking confirmed! Calendly self-booking link dispatched via WhatsApp & SMS.",
         "event": updated_event,
         "whatsapp_result": wa_res,
         "meet_url": meet_url,
+        "calendly_link": calendly_link,
     }

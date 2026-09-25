@@ -82,6 +82,9 @@ class VoiceSettingsPayload(BaseModel):
     voice_id: Optional[str] = "priya"
     sms_alerts_enabled: Optional[bool] = True
     alert_phone_number: Optional[str] = None
+    # Calendly Integration
+    calendly_api_token: Optional[str] = None
+    calendly_event_url: Optional[str] = None
 
 
 class TTSRequest(BaseModel):
@@ -665,6 +668,10 @@ async def get_config():
             else True
         ),
         "alert_phone_number": db_settings.get("alert_phone_number", ""),
+        # Calendly Integration
+        "has_calendly_token": bool(db_settings.get("calendly_api_token")),
+        "calendly_token_masked": f"...{db_settings['calendly_api_token'][-6:]}" if db_settings.get("calendly_api_token") else "",
+        "calendly_event_url": db_settings.get("calendly_event_url", ""),
     }
 
 
@@ -702,6 +709,10 @@ async def save_config(payload: VoiceSettingsPayload):
         updates["sms_alerts_enabled"] = payload.sms_alerts_enabled
     if payload.alert_phone_number is not None:
         updates["alert_phone_number"] = payload.alert_phone_number.strip()
+    if payload.calendly_api_token is not None:
+        updates["calendly_api_token"] = payload.calendly_api_token.strip()
+    if payload.calendly_event_url is not None:
+        updates["calendly_event_url"] = payload.calendly_event_url.strip()
 
     await db.save_voice_settings(updates)
     return {"success": True, "message": "Voice and telephony configuration updated successfully"}

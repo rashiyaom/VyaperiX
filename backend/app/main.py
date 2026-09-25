@@ -47,6 +47,7 @@ from app.routers import whatsapp_router
 from app.routers import prospecting_router
 from app.routers import crm_router
 from app.routers import email_router
+from app.routers import calendly_router
 from app.services.search.router import get_search_router
 from config.domain_trust import classify_and_filter, SeedUrl
 
@@ -106,12 +107,17 @@ app.include_router(crm_router.router, prefix="/api/crm", tags=["CRM & Pipeline"]
 # Mount Email Notifications Router (Greeting & Meeting Confirmation)
 app.include_router(email_router.router, prefix="/api/email", tags=["Email Notifications"])
 
+# Mount Calendly Integration Router
+app.include_router(calendly_router.router, prefix="/api/calendly", tags=["Calendly Integration"])
+
 # Also expose Vapi, Sarvam & Tavus Webhooks and Outbound at root path level for compatibility
 app.add_api_route("/webhook/vapi/custom-voice", voice_router.vapi_custom_voice_webhook, methods=["GET", "POST", "HEAD"], tags=["Voice Fleet Webhook"])
 app.add_api_route("/webhook/vapi", voice_router.vapi_webhook, methods=["POST"], tags=["Voice Fleet Webhook"])
 app.add_api_route("/webhook/tavus", video_router.tavus_webhook, methods=["POST"], tags=["Video Sales Agent Webhook"])
 app.add_api_route("/sarvam/webhook", voice_router.sarvam_webhook, methods=["POST"], tags=["Sarvam Webhook"])
 app.add_api_route("/call/outbound", voice_router.direct_outbound_call, methods=["POST"], tags=["Sarvam Outbound"])
+# Public Calendly webhook (invitee.created / invitee.canceled)
+app.add_api_route("/webhook/calendly", calendly_router.receive_calendly_webhook, methods=["POST"], tags=["Calendly Webhook"])
 
 
 # ─────────────────────────── Calls Compatibility Endpoints ───────────────

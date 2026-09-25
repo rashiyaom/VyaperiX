@@ -293,6 +293,8 @@ export function VoiceFleetModule({
     voice_id: "priya",
     sms_alerts_enabled: true,
     alert_phone_number: "",
+    calendly_api_token: "",
+    calendly_event_url: "",
   });
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsSavedMessage, setSettingsSavedMessage] = useState(false);
@@ -467,6 +469,8 @@ export function VoiceFleetModule({
           voice_id: data.voice_id || "priya",
           sms_alerts_enabled: data.sms_alerts_enabled !== undefined ? Boolean(data.sms_alerts_enabled) : true,
           alert_phone_number: data.alert_phone_number || "",
+          calendly_api_token: data.calendly_token_masked || "",
+          calendly_event_url: data.calendly_event_url || "",
         }));
       }
     } catch (err) {
@@ -2491,6 +2495,42 @@ export function VoiceFleetModule({
                 />
                 <span className="text-[10px] text-muted-foreground block font-mono">
                   Fallback phone number to receive SMS alerts if user profile phone is not set.
+                </span>
+              </div>
+            </div>
+
+            {/* Calendly Integration Section */}
+            <div className="space-y-3 border border-emerald-500/30 bg-emerald-500/5 dark:bg-emerald-950/20 p-4">
+              <div className="flex items-center gap-2 mb-1">
+                <div className="w-2 h-2 bg-emerald-500 rounded-full" />
+                <span className="label-mono text-[10px] text-emerald-700 dark:text-emerald-400 uppercase font-bold tracking-wider">
+                  Calendly Integration — Self-Booking Links for Leads
+                </span>
+              </div>
+              <div className="space-y-1.5 font-mono text-xs">
+                <label className="label-mono text-muted-foreground">Calendly Personal Access Token</label>
+                <input
+                  type="password"
+                  placeholder="eyJ... (paste your Calendly PAT)"
+                  value={settings.calendly_api_token}
+                  onChange={(e) => setSettings({ ...settings, calendly_api_token: e.target.value })}
+                  className="w-full border border-ink/30 bg-paper px-3 py-2 text-ink focus:outline-none focus:border-emerald-500 font-mono text-xs"
+                />
+                <span className="text-[10px] text-muted-foreground block">
+                  Your Calendly API token. Used to fetch your event type scheduling links automatically.
+                </span>
+              </div>
+              <div className="space-y-1.5 font-mono text-xs">
+                <label className="label-mono text-muted-foreground">Calendly Booking URL (override or specific link)</label>
+                <input
+                  type="url"
+                  placeholder="https://calendly.com/yourname/30min"
+                  value={settings.calendly_event_url}
+                  onChange={(e) => setSettings({ ...settings, calendly_event_url: e.target.value })}
+                  className="w-full border border-ink/30 bg-paper px-3 py-2 text-ink focus:outline-none focus:border-emerald-500 font-mono text-xs"
+                />
+                <span className="text-[10px] text-muted-foreground block">
+                  If set, this link is sent to leads via WhatsApp & SMS when a booking is confirmed. Overrides auto-fetch.
                 </span>
               </div>
             </div>

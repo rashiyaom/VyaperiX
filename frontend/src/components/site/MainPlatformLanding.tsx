@@ -23,6 +23,7 @@ import { Tag, Bar, SpeakingWave, LiveDot } from "@/components/app/ui";
 import { VoiceAgentSynthesizerWidget, HeroVoicePreview } from "@/components/app/voice-synthesizer";
 import { ScrollProgressBar, ScrollReveal } from "@/components/app/scroll-reveal";
 import { PipelineCarousel } from "@/components/site/PipelineCarousel";
+import { useAuth } from "@/lib/auth";
 
 const MODULES = [
   {
@@ -253,6 +254,7 @@ const STACK = [
 ];
 
 export function MainPlatformLanding() {
+  const { user, signOut } = useAuth();
   const [activeLang, setActiveLang] = useState<"hi" | "gu" | "en">("hi");
   const protocol = PROTOCOL_TRANSCRIPTS[activeLang] || PROTOCOL_TRANSCRIPTS["hi"]!;
 
@@ -319,13 +321,34 @@ export function MainPlatformLanding() {
             {/* CTA Buttons */}
             <ScrollReveal variant="fade-up" delay={350}>
               <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-3">
-                <Link
-                  to="/login"
-                  className="group inline-flex items-center justify-center gap-3 border border-ink bg-ink px-6 py-4 label-mono text-paper transition-all hover:border-violet hover:bg-violet hover:text-white active:scale-95 shadow-md text-sm"
-                >
-                  Start Free Trial
-                  <ArrowUpRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
-                </Link>
+                {user ? (
+                  <>
+                    <Link
+                      to="/dashboard"
+                      className="group inline-flex items-center justify-center gap-3 border border-ink bg-lime text-black px-6 py-4 label-mono font-bold transition-all hover:bg-white hover:text-black active:scale-95 shadow-md text-sm"
+                    >
+                      <span className="w-2 h-2 rounded-full bg-black animate-pulse" />
+                      Open Command Console
+                      <ArrowUpRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={() => signOut()}
+                      className="inline-flex items-center justify-center gap-2 border border-ink/20 bg-card px-4 py-4 label-mono text-xs text-muted-foreground hover:text-destructive hover:border-destructive transition-all cursor-pointer"
+                    >
+                      Sign Out
+                    </button>
+                  </>
+                ) : (
+                  <Link
+                    to="/login"
+                    search={{ tab: "Signup" }}
+                    className="group inline-flex items-center justify-center gap-3 border border-ink bg-ink px-6 py-4 label-mono text-paper transition-all hover:border-violet hover:bg-violet hover:text-white active:scale-95 shadow-md text-sm"
+                  >
+                    Start Free Trial
+                    <ArrowUpRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+                  </Link>
+                )}
                 <a
                   href="#sandbox"
                   className="inline-flex items-center justify-center gap-2 border border-ink/20 bg-card px-4 py-4 label-mono text-ink hover:border-violet hover:text-violet transition-all text-sm"
@@ -690,13 +713,24 @@ export function MainPlatformLanding() {
               Configure your workspace, set target ICP parameters, and deploy your first
               multilingual voice fleet in minutes.
             </p>
-            <Link
-              to="/login"
-              className="group inline-flex items-center gap-3 border border-ink bg-ink px-6 py-4 label-mono text-paper transition-all hover:border-violet hover:bg-violet hover:text-white active:scale-95 shadow-lg"
-            >
-              Access Sales Console
-              <ArrowUpRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
-            </Link>
+            {user ? (
+              <Link
+                to="/dashboard"
+                className="group inline-flex items-center gap-3 border border-ink bg-lime text-black px-6 py-4 label-mono font-bold transition-all hover:bg-white hover:text-black active:scale-95 shadow-lg"
+              >
+                Access Command Console
+                <ArrowUpRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+              </Link>
+            ) : (
+              <Link
+                to="/login"
+                search={{ tab: "Signup" }}
+                className="group inline-flex items-center gap-3 border border-ink bg-ink px-6 py-4 label-mono text-paper transition-all hover:border-violet hover:bg-violet hover:text-white active:scale-95 shadow-lg"
+              >
+                Start Free Trial →
+                <ArrowUpRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+              </Link>
+            )}
           </ScrollReveal>
 
           <ScrollReveal variant="fade-left" delay={150} className="bg-paper p-8 lg:p-14">

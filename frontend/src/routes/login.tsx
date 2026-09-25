@@ -21,7 +21,23 @@ import { LangSwitcher, useLang } from "@/components/app/lang";
 import { ThemeToggle } from "@/components/app/theme";
 import { useAuth } from "@/lib/auth";
 
+export interface LoginSearchParams {
+  tab?: "Signup" | "Signin" | "Forgot" | undefined;
+  auto?: boolean | undefined;
+}
+
 export const Route = createFileRoute("/login")({
+  validateSearch: (search: Record<string, unknown>): LoginSearchParams => {
+    const rawTab = (search["tab"] as string) || (search["mode"] as string) || "";
+    let tab: "Signup" | "Signin" | "Forgot" | undefined = undefined;
+    if (rawTab.toLowerCase() === "signin") tab = "Signin";
+    else if (rawTab.toLowerCase() === "forgot") tab = "Forgot";
+    else if (rawTab) tab = "Signup";
+    return {
+      tab,
+      auto: search["auto"] === true || search["auto"] === "true",
+    };
+  },
   head: () => ({
     meta: [
       { title: "Sign In & Create Account — VYAPERI X AI Sales Platform" },
@@ -118,6 +134,7 @@ function GoogleIcon() {
 function LoginPage() {
   const { t } = useLang();
   const navigate = useNavigate();
+  const search = Route.useSearch();
   const {
     user,
     session,
@@ -125,15 +142,25 @@ function LoginPage() {
     signInWithGoogle,
     signInWithEmail,
     signUpWithEmail,
+    signOut,
     resendVerificationEmail,
     resetPassword,
   } = useAuth();
 
-  const [tab, setTab] = useState<"Signup" | "Signin" | "Forgot">("Signup");
+  const [tab, setTab] = useState<"Signup" | "Signin" | "Forgot">(() => {
+    return search?.tab || "Signup";
+  });
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  // Sync tab if query param changes
+  useEffect(() => {
+    if (search?.tab) {
+      setTab(search.tab);
+    }
+  }, [search?.tab]);
 
   // Email verification state
   const [verificationPending, setVerificationPending] = useState(false);
@@ -148,16 +175,16 @@ function LoginPage() {
   const [companyName, setCompanyName] = useState("");
   const [industry, setIndustry] = useState("SaaS / Technology");
 
-  // If already authenticated, redirect to onboarding or dashboard
+  // Only redirect automatically if specifically requested with auto param (e.g. from magic links)
   useEffect(() => {
-    if (session && user) {
+    if (session && user && search.auto) {
       if (profile && !profile.onboarding_completed) {
         navigate({ to: "/onboarding" });
       } else {
         navigate({ to: "/dashboard" });
       }
     }
-  }, [session, user, profile, navigate]);
+  }, [session, user, profile, navigate, search.auto]);
 
   // Resend cooldown timer
   useEffect(() => {
@@ -548,6 +575,42 @@ function LoginPage() {
             </div>
           ) : (
             <>
+              {/* Active Session Detected Banner */}
+              {session && user && (
+                <div className="mt-4 mb-3 border border-lime/40 bg-lime/10 p-4 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-sm">
+                  <div className="flex items-center gap-2.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-lime animate-pulse shrink-0" />
+                    <div>
+                      <span className="font-mono text-[11px] font-bold text-lime-foreground dark:text-lime uppercase tracking-wider">
+                        Active Command Session
+                      </span>
+                      <p className="text-xs text-muted-foreground">
+                        Signed in as <strong className="text-ink">{user.email}</strong>
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 w-full sm:w-auto">
+                    <Link
+                      to={profile && !profile.onboarding_completed ? "/onboarding" : "/dashboard"}
+                      className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-ink text-paper label-mono text-xs font-bold hover:bg-violet hover:text-white transition-all shadow-sm"
+                    >
+                      Open Dashboard <ArrowUpRight className="w-3.5 h-3.5" />
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await signOut();
+                        setTab("Signup");
+                        setSuccessMessage("Signed out. You can now create a new account or start a fresh trial.");
+                      }}
+                      className="flex-1 sm:flex-none inline-flex items-center justify-center px-3 py-1.5 border border-ink/30 bg-card hover:bg-destructive hover:text-white label-mono text-xs font-bold transition-all cursor-pointer"
+                    >
+                      Sign Out
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* Tabs */}
               <div className="mt-6 grid grid-cols-2 gap-px border border-ink/30 bg-ink/15">
                 {[

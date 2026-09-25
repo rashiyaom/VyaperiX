@@ -62,6 +62,19 @@ export interface CalendarEventRecord {
   synced_to_google: boolean;
   created_at: string;
   updated_at: string;
+  // Calendly Integration
+  calendly_link?: string;
+  calendly_link_sent_at?: string;
+  calendly_booked?: boolean;
+  calendly_booking_at?: string;
+  calendly_invitee_name?: string;
+  calendly_invitee_email?: string;
+  calendly_event_uri?: string;
+  calendly_cancel_url?: string;
+  calendly_reschedule_url?: string;
+  calendly_canceled_at?: string;
+  approved_at?: string;
+  approved_by?: string;
 }
 
 export interface CalendarModuleProps {
@@ -179,7 +192,10 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        triggerSuccess(`✓ Meeting Confirmed & WhatsApp dispatched to ${data.event?.customer_phone || "customer"} with Live Video link!`);
+        const calendlyMsg = data.calendly_link
+          ? ` Calendly booking link sent to customer.`
+          : ` Meeting link dispatched.`;
+        triggerSuccess(`✓ Booking confirmed & notifications dispatched to ${data.event?.customer_phone || "customer"}.${calendlyMsg}`);
         await fetchEvents();
         if (selectedEvent?.id === eventId) {
           setSelectedEvent(data.event || null);
@@ -553,7 +569,24 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
                         className="inline-flex items-center gap-1.5 text-[11px] font-mono text-violet hover:underline truncate max-w-full"
                       >
                         <Video className="w-3.5 h-3.5 shrink-0" />
-                        <span className="truncate">Live Video Room: {ev.meet_url.split("/").pop()}</span>
+                        <span className="truncate">Video: {ev.meet_url.split("/").pop()}</span>
+                        <ExternalLink className="w-2.5 h-2.5 shrink-0" />
+                      </a>
+                    </div>
+                  )}
+
+                  {ev.calendly_link && (
+                    <div className="pt-0.5">
+                      <a
+                        href={ev.calendly_link}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 text-[11px] font-mono text-emerald-700 dark:text-emerald-400 hover:underline truncate max-w-full"
+                      >
+                        <Link2 className="w-3.5 h-3.5 shrink-0" />
+                        <span className="truncate">
+                          {ev.calendly_booked ? "✓ Booked via Calendly" : "Calendly booking link sent"}
+                        </span>
                         <ExternalLink className="w-2.5 h-2.5 shrink-0" />
                       </a>
                     </div>
@@ -1237,6 +1270,47 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
               </div>
             )}
 
+            {/* Calendly Booking Link */}
+            {selectedEvent.calendly_link && (
+              <div className="border border-emerald-500/40 bg-emerald-500/5 dark:bg-emerald-950/20 p-3">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="label-mono text-[9px] text-emerald-700 dark:text-emerald-400 uppercase font-bold flex items-center gap-1">
+                    <Link2 className="w-3 h-3" />
+                    Calendly Booking Link (Sent to Customer)
+                  </span>
+                  {selectedEvent.calendly_booked ? (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30">
+                      <CheckCircle2 className="w-3 h-3" /> Booked via Calendly
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-mono font-bold bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30">
+                      <Clock className="w-3 h-3" /> Pending Customer Booking
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-mono text-xs text-emerald-800 dark:text-emerald-300 truncate font-semibold">
+                    {selectedEvent.calendly_link}
+                  </span>
+                  <a
+                    href={selectedEvent.calendly_link}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center gap-1 bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 label-mono text-xs font-bold shrink-0 transition-all"
+                  >
+                    <ExternalLink className="w-3 h-3" />
+                    <span>Open</span>
+                  </a>
+                </div>
+                {selectedEvent.calendly_booked && selectedEvent.calendly_invitee_name && (
+                  <p className="mt-1.5 text-[11px] font-mono text-emerald-700 dark:text-emerald-400">
+                    ✓ Booked by: <strong>{selectedEvent.calendly_invitee_name}</strong>
+                    {selectedEvent.calendly_invitee_email ? ` (${selectedEvent.calendly_invitee_email})` : ""}
+                  </p>
+                )}
+              </div>
+            )}
+
             {/* Conversation Transcript (if available from voice call) */}
             {selectedEvent.transcript && (
               <div className="space-y-1">
@@ -1282,7 +1356,7 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
                     ) : (
                       <Check className="w-3.5 h-3.5" />
                     )}
-                    <span>✓ Confirm & Send WhatsApp</span>
+                    <span>✓ Confirm & Send Calendly Link</span>
                   </button>
                 ) : (
                   <button
@@ -1598,7 +1672,7 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
                     className="px-4 py-1.5 border border-ink bg-emerald-600 hover:bg-emerald-700 text-white label-mono text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all"
                   >
                     <Check className="w-3.5 h-3.5" />
-                    <span>Confirm & Send WhatsApp</span>
+                    <span>✓ Confirm & Send Calendly Link</span>
                   </button>
                 )}
               </div>
