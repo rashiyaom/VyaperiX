@@ -117,13 +117,14 @@ def _parse_and_validate_briefing(raw_text: str) -> Dict[str, str]:
     }
 
 
-def compile_meeting_briefing(analysis: dict) -> dict:
+def compile_meeting_briefing(analysis: dict, raw_profile: Optional[dict] = None) -> dict:
     """
-    Compiles commercial due-diligence analysis JSON into conversational context
-    and a custom greeting for Mitra (AI video sales agent).
+    Compiles commercial due-diligence analysis and website profile into conversational context
+    and a custom greeting for Mitra (AI video agent).
 
     Args:
         analysis: Dictionary containing BusinessAnalysis data.
+        raw_profile: Optional dictionary containing scraped website pages and URLs.
 
     Returns:
         dict with exactly two string keys: 'conversational_context' and 'custom_greeting'.
@@ -133,7 +134,26 @@ def compile_meeting_briefing(analysis: dict) -> dict:
     """
     client = _get_client()
     system_prompt = _load_system_prompt()
-    user_message_content = json.dumps(analysis, indent=2)
+
+    payload_dict = {
+        "analysis": analysis,
+    }
+    if raw_profile:
+        payload_dict["website_metadata"] = {
+            "source_url": raw_profile.get("source_url") or "https://rashiyaom.netlify.app",
+            "company_name": raw_profile.get("company_name") or analysis.get("company_name") or "Rashiya Om / OmOS",
+            "business_description": raw_profile.get("business_description") or "Phone-first portfolio & custom software development services",
+            "founder": "Om Rashiya (Software Engineer & AI/ML Specialist, IIT Mandi credentials)",
+            "key_page_titles": [p.get("title") for p in raw_profile.get("pages", [])[:5] if p.get("title")],
+        }
+    else:
+        payload_dict["website_metadata"] = {
+            "source_url": "https://rashiyaom.netlify.app",
+            "company_name": analysis.get("company_name") or "Rashiya Om / OmOS",
+            "founder": "Om Rashiya (Software Engineer & AI/ML Specialist, IIT Mandi credentials)",
+            "core_offerings": "Custom Full-Stack Web Applications, Finance Web Portals, Dashboards, AI SDRs",
+        }
+    user_message_content = json.dumps(payload_dict, indent=2)
 
     last_error: Optional[Exception] = None
 
@@ -195,7 +215,7 @@ def compile_meeting_briefing(analysis: dict) -> dict:
 
     # Fallback to Gemini if Groq models failed
     logger.warning(f"Groq API models failed for briefing compiler ({last_error}). Attempting Gemini fallback...")
-    gemini_briefing = _compile_with_gemini(analysis, system_prompt)
+    gemini_briefing = _compile_with_gemini(analysis, system_prompt, user_content=user_message_content)
     if gemini_briefing:
         return gemini_briefing
 
@@ -204,20 +224,21 @@ def compile_meeting_briefing(analysis: dict) -> dict:
     ) from last_error
 
 
-def _compile_with_gemini(analysis: dict, system_prompt: str) -> Optional[dict]:
+def _compile_with_gemini(analysis: dict, system_prompt: str, user_content: Optional[str] = None) -> Optional[dict]:
     """Fallback compiler using Google Gemini when Groq hits rate limits or capacity constraints."""
-    gemini_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    gemini_key = os.environ.get("GEMINI_API_KEY", "").strip() or os.environ.get("GEMINI_API_KEY_BACKUP", "").strip()
     if not gemini_key:
         return None
     try:
         from google import genai
         client = genai.Client(api_key=gemini_key)
+        input_body = user_content or json.dumps(analysis, indent=2)
         prompt = (
             f"{system_prompt}\n\n"
-            f"BUSINESS ANALYSIS INPUT:\n{json.dumps(analysis, indent=2)}\n\n"
+            f"BUSINESS ANALYSIS & WEBSITE INPUT:\n{input_body}\n\n"
             "Return valid JSON matching the schema with 'conversational_context' and 'custom_greeting'."
         )
-        for m in [os.environ.get("GEMINI_MODEL", "gemini-3.8-flash"), "gemini-2.5-flash"]:
+        for m in [os.environ.get("GEMINI_MODEL", "gemini-3.8-flash"), "gemini-3.8-flash"]:
             try:
                 logger.info(f"Compiling meeting briefing with Gemini ({m})...")
                 resp = client.models.generate_content(

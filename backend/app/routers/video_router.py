@@ -163,8 +163,15 @@ async def start_video_meeting(
         except Exception:
             analysis = {}
 
+    raw_profile = report.get("raw_profile") or {}
+    if isinstance(raw_profile, str):
+        try:
+            raw_profile = json.loads(raw_profile)
+        except Exception:
+            raw_profile = {}
+
     try:
-        briefing = await asyncio.to_thread(compile_meeting_briefing, analysis)
+        briefing = await asyncio.to_thread(compile_meeting_briefing, analysis, raw_profile)
     except BriefingCompilerError as bce:
         logger.error(f"Briefing compiler failed for report {report_id}: {bce}")
         raise HTTPException(
@@ -196,10 +203,9 @@ async def start_video_meeting(
             detail="TAVUS_PAL_ID (or TAVUS_PERSONA_ID) is not configured in backend environment.",
         )
 
-    # Build Tavus v2 create conversation request payload (persona_id and pal_id are aliases; Tavus requires exactly one)
+    # Build Tavus v2 create conversation request payload (only persona_id should be sent; persona_id and pal_id are aliases)
     tavus_payload: Dict[str, Any] = {
         "persona_id": tavus_pal_id,
-        "pal_id": tavus_pal_id,
         "conversational_context": briefing["conversational_context"],
         "custom_greeting": briefing["custom_greeting"],
     }

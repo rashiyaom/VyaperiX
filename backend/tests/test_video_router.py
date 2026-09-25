@@ -252,10 +252,10 @@ def test_start_meeting_success(client, user_a, token_a):
         assert "video_call_id" in data
         assert data["conversation_url"] == "https://tavus.daily.co/c_tavus_999"
 
-        # Verify Tavus POST payload was called with pal_id, conversational_context, custom_greeting
+        # Verify Tavus POST payload was called with persona_id, conversational_context, custom_greeting
         tavus_call_kwargs = mock_tavus_post.call_args.kwargs
         payload_sent = tavus_call_kwargs["json"]
-        assert payload_sent["pal_id"] == "pal_cloud_456"
+        assert (payload_sent.get("persona_id") or payload_sent.get("pal_id")) == "pal_cloud_456"
         assert payload_sent["conversational_context"] == mock_briefing["conversational_context"]
         assert payload_sent["custom_greeting"] == mock_briefing["custom_greeting"]
         assert "callback_url" not in payload_sent  # Omitted when empty
