@@ -80,6 +80,11 @@ class VoiceSettingsPayload(BaseModel):
     public_webhook_url: Optional[str] = None
     voice_provider: Optional[str] = "sarvam"
     voice_id: Optional[str] = "priya"
+    sms_alerts_enabled: Optional[bool] = True
+    alert_phone_number: Optional[str] = None
+    # Calendly Integration
+    calendly_api_token: Optional[str] = None
+    calendly_event_url: Optional[str] = None
 
 
 class TTSRequest(BaseModel):
@@ -109,6 +114,18 @@ async def create_single_call(
                 resolved_user_id = auth_user.id
         except Exception:
             pass
+
+    # ── Hate Speech & Abuse Blocklist Pre-Call Interception ───────────────
+    is_blocked, block_info = await db.is_number_blocked(payload.customer_phone)
+    if is_blocked:
+        reason = block_info.get("reason", "Hate speech / policy violation") if block_info else "Blacklisted"
+        logger.warning(f"🚫 Blocked outbound call attempt to blacklisted number {payload.customer_phone}: {reason}")
+        return {
+            "success": False,
+            "blocked": True,
+            "error": f"Call Blocked: {payload.customer_phone} is in the Blocklist ({reason}).",
+            "block_record": block_info,
+        }
 
     call_id = str(uuid.uuid4())
     call_data = {
@@ -162,6 +179,19 @@ async def direct_outbound_call(payload: DirectOutboundCallRequest):
     """
     call_id = str(uuid.uuid4())
     formatted_phone = sarvam_service.format_e164_phone_number(payload.phone_number)
+
+    # ── Hate Speech & Abuse Blocklist Pre-Call Interception ───────────────
+    is_blocked, block_info = await db.is_number_blocked(formatted_phone)
+    if is_blocked:
+        reason = block_info.get("reason", "Hate speech / policy violation") if block_info else "Blacklisted"
+        logger.warning(f"🚫 Blocked direct call attempt to blacklisted number {formatted_phone}: {reason}")
+        return {
+            "success": False,
+            "blocked": True,
+            "error": f"Call Blocked: {formatted_phone} is in the Blocklist ({reason}).",
+            "block_record": block_info,
+        }
+
     customer_name = (payload.customer_name or "Customer").strip()
     business_name = (payload.business_name or "Vyepari CRM").strip()
     call_reason = (payload.call_reason or "Outbound Consultation").strip()
@@ -214,6 +244,12 @@ async def create_batch_calls(payload: BatchCallRequest, background_tasks: Backgr
 
     async def _process_batch(items: List[CallRequest], camp_id: str, force_sim: bool, fallback_user_id: Optional[str] = None):
         for item in items:
+            # Skip any blacklisted numbers in campaign dialer
+            is_blocked, _ = await db.is_number_blocked(item.customer_phone)
+            if is_blocked:
+                logger.info(f"🚫 Auto-skipping campaign call to blocked number: {item.customer_phone}")
+                continue
+
             c_id = str(uuid.uuid4())
             call_data = {
                 "id": c_id,
@@ -636,8 +672,9 @@ async def get_stats(
 
 @router.get("/config")
 async def get_config():
-    """Get active voice and telephony configuration (masked for security)."""
+    """Get active voice, telephony, and SMS configuration (masked for security)."""
     creds = await voice_engine.get_credentials()
+    db_settings = await db.get_voice_settings()
     return {
         "has_vapi_key": bool(creds.get("vapi_api_key")),
         "vapi_key_masked": f"...{creds['vapi_api_key'][-4:]}" if creds.get("vapi_api_key") else "",
@@ -654,6 +691,18 @@ async def get_config():
         "public_webhook_url": creds.get("public_webhook_url", "") or os.getenv("PUBLIC_BASE_URL", ""),
         "voice_provider": creds.get("voice_provider", "sarvam"),
         "voice_id": creds.get("voice_id", "priya"),
+        "sms_alerts_enabled": (
+            db_settings.get("sms_alerts_enabled")
+            if isinstance(db_settings.get("sms_alerts_enabled"), bool)
+            else (db_settings.get("sms_alerts_enabled", "true").lower() not in ("false", "0", "no", "off"))
+            if isinstance(db_settings.get("sms_alerts_enabled"), str)
+            else True
+        ),
+        "alert_phone_number": db_settings.get("alert_phone_number", ""),
+        # Calendly Integration
+        "has_calendly_token": bool(db_settings.get("calendly_api_token")),
+        "calendly_token_masked": f"...{db_settings['calendly_api_token'][-6:]}" if db_settings.get("calendly_api_token") else "",
+        "calendly_event_url": db_settings.get("calendly_event_url", ""),
     }
 
 
@@ -687,6 +736,14 @@ async def save_config(payload: VoiceSettingsPayload):
         updates["voice_provider"] = payload.voice_provider.strip()
     if payload.voice_id is not None:
         updates["voice_id"] = payload.voice_id.strip()
+    if payload.sms_alerts_enabled is not None:
+        updates["sms_alerts_enabled"] = payload.sms_alerts_enabled
+    if payload.alert_phone_number is not None:
+        updates["alert_phone_number"] = payload.alert_phone_number.strip()
+    if payload.calendly_api_token is not None:
+        updates["calendly_api_token"] = payload.calendly_api_token.strip()
+    if payload.calendly_event_url is not None:
+        updates["calendly_event_url"] = payload.calendly_event_url.strip()
 
     await db.save_voice_settings(updates)
     return {"success": True, "message": "Voice and telephony configuration updated successfully"}

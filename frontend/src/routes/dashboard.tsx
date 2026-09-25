@@ -1,5 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useAuth } from "@/lib/auth";
+import { getApiBase, getAuthHeaders } from "@/lib/api";
 import { useState, useEffect, useRef } from "react";
 import {
   Brain,
@@ -33,6 +34,7 @@ import {
   ListChecks,
   Zap,
   ShieldCheck,
+  ShieldAlert,
   TrendingUp,
   Printer,
   LogOut,
@@ -43,6 +45,7 @@ import {
   FileCheck2,
   Sliders,
   MessageCircle,
+  LayoutDashboard,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -66,7 +69,7 @@ import {
 } from "recharts";
 import { Logo } from "@/components/site/Chrome";
 import { FileUploadZone } from "@/components/scraper/FileUploadZone";
-import { ReportChat } from "@/components/scraper/ReportChat";
+import { useChatWidget } from "@/components/chat/ChatWidgetProvider";
 import {
   DocumentInsightPanel,
   DiscrepancyAlerts,
@@ -85,9 +88,15 @@ import { LeadRadarModule } from "@/components/modules/radar";
 import { VoiceFleetModule } from "@/components/modules/voice";
 import { VideoMeetingModule } from "@/components/modules/video";
 import { CalendarModule } from "@/components/modules/calendar";
+import { WhatsAppModule } from "@/components/modules/whatsapp";
+import { CRMModule } from "@/components/modules/crm";
 import { AnalyticsModule } from "@/components/modules/analytics";
 import { SettingsModule } from "@/components/modules/settings";
+import { OverviewDashboard } from "@/components/modules/overview";
+import { SecretGuardrailPanel } from "@/components/modules/guardrail/SecretGuardrailPanel";
 import { MODULE_REGISTRY } from "@/modules/registry";
+import { ThemeToggle } from "@/components/app/theme";
+import { LangSwitcher } from "@/components/app/lang";
 
 export const Route = createFileRoute("/dashboard")({
   head: () => ({
@@ -102,11 +111,10 @@ export const Route = createFileRoute("/dashboard")({
 const API_BASE = (import.meta.env["VITE_SCRAPER_API_BASE"] as string) || "http://127.0.0.1:8000";
 
 async function safeApiFetch(endpoint: string, init?: RequestInit): Promise<Response> {
-  const primary = endpoint.startsWith("http") ? endpoint : `${API_BASE}${endpoint.startsWith("/") ? "" : "/"}${endpoint}`;
-  console.log("[safeApiFetch] Trying:", primary);
+  const base = getApiBase();
+  const primary = endpoint.startsWith("http") ? endpoint : `${base}${endpoint.startsWith("/") ? "" : "/"}${endpoint}`;
   try {
     const res = await fetch(primary, init);
-    console.log("[safeApiFetch] Success from:", primary, res.status);
     return res;
   } catch (err: any) {
     console.warn("[safeApiFetch] Failed for:", primary, err);
@@ -114,10 +122,8 @@ async function safeApiFetch(endpoint: string, init?: RequestInit): Promise<Respo
     const is127 = primary.includes("127.0.0.1:8000");
     if (isLocalhost || is127) {
       const fallbackUrl = isLocalhost ? primary.replace("localhost:8000", "127.0.0.1:8000") : primary.replace("127.0.0.1:8000", "localhost:8000");
-      console.log("[safeApiFetch] Trying fallback:", fallbackUrl);
       try {
         const res = await fetch(fallbackUrl, init);
-        console.log("[safeApiFetch] Fallback success from:", fallbackUrl, res.status);
         return res;
       } catch (fallbackErr) {
         console.error("[safeApiFetch] Fallback also failed:", fallbackErr);
@@ -132,6 +138,32 @@ async function safeApiFetch(endpoint: string, init?: RequestInit): Promise<Respo
     throw err;
   }
 }
+
+/* ─── Ultra High-Contrast Cyberpunk Tooltip Props ─── */
+const tooltipBoxStyle: React.CSSProperties = {
+  backgroundColor: "#0D0E14",
+  borderWidth: "1px",
+  borderStyle: "solid",
+  borderColor: "#7C3AED",
+  borderRadius: 0,
+  padding: "8px 12px",
+  boxShadow: "0 10px 30px rgba(0,0,0,0.6)",
+};
+
+const tooltipItemStyle: React.CSSProperties = {
+  color: "#ffffff",
+  fontFamily: "monospace",
+  fontSize: "11px",
+  fontWeight: "bold",
+};
+
+const tooltipLabelStyle: React.CSSProperties = {
+  color: "#A3E635",
+  fontFamily: "monospace",
+  fontSize: "11px",
+  fontWeight: "bold",
+  marginBottom: "4px",
+};
 
 /* ─── Types ─── */
 interface RecentReport {
@@ -492,11 +524,13 @@ function ReportView({
   onNavigateModule?: (moduleId: string) => void;
   onReportFinished?: (report: ReportData) => void;
 }) {
+  const { open: openChat, setActiveReportId } = useChatWidget();
+  const { session } = useAuth();
   const [report, setReport] = useState<ReportData | null>(null);
   const [copied, setCopied] = useState(false);
   const [completedSteps, setCompletedSteps] = useState<Record<string, boolean>>({});
   const [activeBifurcation, setActiveBifurcation] = useState<
-    "overview" | "financial" | "pipeline" | "timeline" | "icp" | "audit" | "chat" | "all"
+    "overview" | "financial" | "pipeline" | "timeline" | "icp" | "audit" | "all"
   >("overview");
   const [userMonthlyRevenue, setUserMonthlyRevenue] = useState<string>("");
   const [userDealCycle, setUserDealCycle] = useState<string>("");
@@ -504,12 +538,22 @@ function ReportView({
   const finishedNotifiedRef = useRef<string | null>(null);
 
   useEffect(() => {
+    if (reportId) {
+      setActiveReportId(reportId, report?.analysis?.company_name || null);
+    }
+    return () => {
+      setActiveReportId(null);
+    };
+  }, [reportId, report?.analysis?.company_name, setActiveReportId]);
+
+  useEffect(() => {
     let iv: ReturnType<typeof setInterval>;
     let isSubscribed = true;
     let notFoundRetries = 0;
     const fetch_ = async () => {
       try {
-        const res = await safeApiFetch(`/api/reports/${reportId}`);
+        const headers = getAuthHeaders(session?.access_token);
+        const res = await safeApiFetch(`/api/reports/${reportId}`, { headers });
         if (res.ok && isSubscribed) {
           notFoundRetries = 0;
           const data: ReportData = await res.json();
@@ -790,7 +834,7 @@ function ReportView({
   }
 
   // 4. ICP Customer Deal Size Donut Data (strictly from Groq target_customers)
-  const COLORS = ["#7C3AED", "#A3E635", "#111111", "#f59e0b", "#06b6d4"];
+  const COLORS = ["#8B5CF6", "#10B981", "#F59E0B", "#06B6D4", "#EC4899", "#3B82F6"];
   const pieData =
     customers.length > 0
       ? customers.map((c) => ({
@@ -866,6 +910,12 @@ function ReportView({
         </button>
         <div className="flex items-center gap-2">
           <button
+            onClick={openChat}
+            className="flex items-center gap-1.5 border border-violet bg-violet/10 text-violet px-3 py-1.5 label-mono font-bold hover:bg-violet hover:text-violet-foreground transition-all"
+          >
+            <MessageCircle className="w-3.5 h-3.5" /> Ask This Report
+          </button>
+          <button
             onClick={handleCopy}
             className="flex items-center gap-1.5 border border-ink/25 bg-card px-3 py-1.5 label-mono hover:border-violet hover:text-violet transition-all"
           >
@@ -939,17 +989,16 @@ function ReportView({
       )}
 
       {/* ── BIFURCATED NAVIGATION CONTROLLER ── */}
-      <div className="border-b border-ink/20 pb-2">
-        <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1">
+      <div className="border-b border-ink/20 pb-1">
+        <div className="flex items-center gap-1 overflow-x-auto no-scrollbar py-1 px-0.5">
           {[
-            { id: "overview", label: "01. Overview & Radar", icon: Swords, badge: "6 Vectors" },
-            { id: "financial", label: "02. Financial & Revenue", icon: TrendingUp, badge: revenueChartData.length > 0 ? `${revenueChartData.length} Periods` : "Option A / B" },
-            { id: "pipeline", label: "03. Pipeline & Flask", icon: Layers, badge: funnelChartData.length > 0 ? `${funnelChartData.length} Stages` : "Upload CRM" },
-            { id: "timeline", label: "04. Execution Timeline", icon: Clock, badge: `${analysis.timeline_roadmap?.length || 4} Phases` },
-            { id: "icp", label: "05. ICP & Market Matrix", icon: Users, badge: `${customers.length} ICPs` },
-            { id: "audit", label: "06. Document Audit", icon: FileText, badge: `${analysis.document_insights?.length || 0} Docs` },
-            { id: "chat", label: "07. Ask This Report", icon: MessageCircle },
-            { id: "all", label: "View All Sections", icon: FileCheck2 },
+            { id: "overview", label: "01. Overview & Radar", shortLabel: "Overview", icon: Swords, badge: "6 Vectors" },
+            { id: "financial", label: "02. Financial & Revenue", shortLabel: "Finance", icon: TrendingUp, badge: revenueChartData.length > 0 ? `${revenueChartData.length} Periods` : "Option A / B" },
+            { id: "pipeline", label: "03. Pipeline & Flask", shortLabel: "Pipeline", icon: Layers, badge: funnelChartData.length > 0 ? `${funnelChartData.length} Stages` : "Upload CRM" },
+            { id: "timeline", label: "04. Execution Timeline", shortLabel: "Timeline", icon: Clock, badge: `${analysis.timeline_roadmap?.length || 4} Phases` },
+            { id: "icp", label: "05. ICP & Market Matrix", shortLabel: "ICP", icon: Users, badge: `${customers.length} ICPs` },
+            { id: "audit", label: "06. Document Audit", shortLabel: "Audit", icon: FileText, badge: `${analysis.document_insights?.length || 0} Docs` },
+            { id: "all", label: "View All Sections", shortLabel: "All", icon: FileCheck2 },
           ].map((tab) => {
             const isAct = activeBifurcation === tab.id;
             const Icon = tab.icon;
@@ -957,17 +1006,18 @@ function ReportView({
               <button
                 key={tab.id}
                 onClick={() => setActiveBifurcation(tab.id as any)}
-                className={`flex items-center gap-2 px-3.5 py-2 label-mono text-xs font-bold border transition-all whitespace-nowrap ${
+                className={`flex items-center gap-1.5 px-2.5 sm:px-3.5 py-2 label-mono text-xs font-bold border transition-all whitespace-nowrap shrink-0 min-h-[36px] ${
                   isAct
                     ? "border-violet bg-violet text-violet-foreground shadow-sm"
                     : "border-ink/20 bg-card text-muted-foreground hover:text-ink hover:border-ink/40"
                 }`}
               >
-                <Icon className={`w-3.5 h-3.5 ${isAct ? "text-lime" : "text-violet"}`} />
-                <span>{tab.label}</span>
+                <Icon className={`w-3.5 h-3.5 shrink-0 ${isAct ? "text-lime" : "text-violet"}`} />
+                <span className="hidden sm:inline">{tab.label}</span>
+                <span className="sm:hidden">{tab.shortLabel}</span>
                 {tab.badge && (
                   <span
-                    className={`label-mono text-[9px] px-1.5 py-0.2 border ${
+                    className={`hidden sm:inline label-mono text-[9px] px-1.5 py-0.5 border ${
                       isAct ? "border-paper/40 bg-paper/20 text-paper" : "border-ink/15 bg-secondary text-muted-foreground"
                     }`}
                   >
@@ -979,6 +1029,7 @@ function ReportView({
           })}
         </div>
       </div>
+
 
       {/* ══════════════════════════════════════════════════════════════════
           BIFURCATION 01: OVERVIEW & COMMERCIAL RADAR
@@ -1049,20 +1100,18 @@ function ReportView({
                   <Radar
                     name="Competitor Avg"
                     dataKey="marketAvg"
-                    stroke="#111111"
-                    fill="#111111"
-                    fillOpacity={0.15}
+                    stroke="#6B7280"
+                    fill="#6B7280"
+                    fillOpacity={0.25}
                   />
-                  <Legend wrapperStyle={{ fontFamily: "monospace", fontSize: "10px" }} />
+                  <Legend
+                    wrapperStyle={{ fontFamily: "monospace", fontSize: "11px", paddingTop: "8px" }}
+                    formatter={(value) => <span className="text-ink font-mono font-semibold text-[11px] ml-1">{value}</span>}
+                  />
                   <Tooltip
-                    contentStyle={{
-                      backgroundColor: "#0d0d0d",
-                      borderColor: "#A3E635",
-                      color: "#f5f5f0",
-                      fontFamily: "monospace",
-                      fontSize: "11px",
-                      borderRadius: 0,
-                    }}
+                    contentStyle={{ ...tooltipBoxStyle, borderColor: "#A3E635" }}
+                    itemStyle={tooltipItemStyle}
+                    labelStyle={{ ...tooltipLabelStyle, color: "#A3E635" }}
                   />
                 </RadarChart>
               </ResponsiveContainer>
@@ -1212,22 +1261,20 @@ function ReportView({
                         }
                       />
                       <Tooltip
-                        contentStyle={{
-                          backgroundColor: "#0d0d0d",
-                          borderColor: "#7C3AED",
-                          color: "#f5f5f0",
-                          fontFamily: "monospace",
-                          fontSize: "11px",
-                          borderRadius: 0,
-                        }}
-                        formatter={(val: any) => [
+                        contentStyle={{ ...tooltipBoxStyle, borderColor: "#8B5CF6" }}
+                        itemStyle={tooltipItemStyle}
+                        labelStyle={{ ...tooltipLabelStyle, color: "#A3E635" }}
+                        formatter={(val: any, name: any) => [
                           hasUserRevenue
                             ? `₹${Number(val).toLocaleString("en-IN")}`
                             : `$${Number(val).toLocaleString()}`,
-                          "",
+                          name || "Projected Revenue",
                         ]}
                       />
-                      <Legend wrapperStyle={{ fontFamily: "monospace", fontSize: "10px" }} />
+                      <Legend
+                        wrapperStyle={{ fontFamily: "monospace", fontSize: "11px", paddingTop: "8px" }}
+                        formatter={(value) => <span className="text-ink font-mono font-semibold text-[11px] ml-1">{value}</span>}
+                      />
                       <Area
                         type="monotone"
                         dataKey="optimizedMRR"
@@ -1428,14 +1475,9 @@ function ReportView({
                         <XAxis dataKey="stage" stroke="#666" tick={{ fontFamily: "monospace", fontSize: 9 }} />
                         <YAxis stroke="#666" tick={{ fontFamily: "monospace", fontSize: 10 }} tickFormatter={(v) => `${v}%`} />
                         <Tooltip
-                          contentStyle={{
-                            backgroundColor: "#0d0d0d",
-                            borderColor: "#7C3AED",
-                            color: "#f5f5f0",
-                            fontFamily: "monospace",
-                            fontSize: "11px",
-                            borderRadius: 0,
-                          }}
+                          contentStyle={{ ...tooltipBoxStyle, borderColor: "#7C3AED" }}
+                          itemStyle={tooltipItemStyle}
+                          labelStyle={{ ...tooltipLabelStyle, color: "#A3E635" }}
                           formatter={(val: any) => [`${val}% Efficiency`, "Health Score"]}
                         />
                         <Bar dataKey="efficiency" fill="#7C3AED" radius={0}>
@@ -1600,20 +1642,18 @@ function ReportView({
                       ))}
                     </Pie>
                     <Tooltip
-                      contentStyle={{
-                        backgroundColor: "#0d0d0d",
-                        borderColor: "#A3E635",
-                        color: "#f5f5f0",
-                        fontFamily: "monospace",
-                        fontSize: "11px",
-                        borderRadius: 0,
-                      }}
+                      contentStyle={{ ...tooltipBoxStyle, borderColor: "#10B981", padding: "8px 12px" }}
+                      itemStyle={tooltipItemStyle}
+                      labelStyle={{ ...tooltipLabelStyle, color: "#10B981" }}
                       formatter={(val: any, name: any, item: any) => [
-                        `${item.payload.dealSize} deal size`,
-                        item.payload.name,
+                        `${item.payload.dealSize || "Custom"} deal size`,
+                        item.payload.name || name,
                       ]}
                     />
-                    <Legend wrapperStyle={{ fontFamily: "monospace", fontSize: "10px" }} />
+                    <Legend
+                      wrapperStyle={{ fontFamily: "monospace", fontSize: "11px", paddingTop: "12px" }}
+                      formatter={(value) => <span className="text-ink font-mono font-semibold text-[11px] ml-1">{value}</span>}
+                    />
                   </PieChart>
                 </ResponsiveContainer>
               </div>
@@ -1753,17 +1793,188 @@ function ReportView({
           ) : null}
         </div>
       )}
-      {activeBifurcation === "chat" && <ReportChat key={report.id} reportId={report.id} />}
     </div>
+  );
+}
+
+/* ─── MOBILE DRAWER (Dashboard) ─── */
+function MobileDashboardDrawer({
+  isOpen,
+  onClose,
+  navItems,
+  activeNav,
+  onSelectNav,
+  hasCompletedReport,
+  onSignOut,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  navItems: (typeof MODULE_REGISTRY[number] & { isUnlocked: boolean })[];
+  activeNav: string;
+  onSelectNav: (id: string) => void;
+  hasCompletedReport: boolean;
+  onSignOut: () => void;
+}) {
+  if (!isOpen) return null;
+  return (
+    <div
+      className="fixed inset-0 z-[99999] h-[100dvh] w-screen pointer-events-auto"
+      style={{ isolation: "isolate" }}
+    >
+      {/* Backdrop */}
+      <div
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        onClick={onClose}
+      />
+      {/* Drawer Panel */}
+      <div className="absolute inset-y-0 left-0 w-[80vw] max-w-xs bg-[#0D0E14] text-[#f6f6f6] flex flex-col overflow-y-auto shadow-2xl border-r border-white/10">
+        {/* Drawer Header */}
+        <div className="flex items-center justify-between border-b border-white/15 px-4 py-3 shrink-0">
+          <Logo />
+          <button
+            onClick={onClose}
+            className="flex h-9 w-9 items-center justify-center border-2 border-lime bg-lime text-lime-foreground font-black hover:bg-white hover:text-black transition-all active:scale-95"
+            aria-label="Close menu"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+        {/* Module Nav */}
+        <nav className="flex-1 p-3 space-y-0.5 pt-4">
+          <span className="label-mono text-[9px] text-lime/70 font-bold tracking-widest px-2 pb-2 block">MODULES</span>
+          {navItems.map((item) => {
+            const isActive = activeNav === item.id;
+            const isUnlocked = item.isUnlocked;
+            return (
+              <button
+                key={item.id}
+                onClick={() => {
+                  if (isUnlocked) {
+                    onSelectNav(item.id);
+                    onClose();
+                  }
+                }}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 transition-all text-left ${
+                  isActive
+                    ? "border border-violet/40 bg-violet/20 text-lime font-bold"
+                    : isUnlocked
+                    ? "border border-transparent text-white/70 hover:border-white/20 hover:text-white hover:bg-white/5"
+                    : "border border-transparent text-white/20 cursor-not-allowed opacity-50"
+                }`}
+              >
+                <item.icon className={`w-4 h-4 shrink-0 ${isActive ? "text-lime" : isUnlocked ? "text-white/60" : "text-white/20"}`} />
+                <span className="font-mono text-xs font-medium flex-1 truncate">{item.label}</span>
+                {!isUnlocked && <svg className="w-3 h-3 text-white/20 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>}
+                {isUnlocked && item.badge && (
+                  <span className="label-mono border border-lime/30 bg-lime/10 text-lime text-[8px] px-1 py-0.5 shrink-0">{item.badge}</span>
+                )}
+              </button>
+            );
+          })}
+        </nav>
+        {/* Drawer Footer */}
+        <div className="border-t border-white/10 p-4 space-y-3 shrink-0">
+          {hasCompletedReport && (
+            <div className="flex items-center gap-2 border border-lime/30 bg-lime/10 px-3 py-2 label-mono text-[10px] text-lime font-bold">
+              <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clipRule="evenodd" /></svg>
+              ALL MODULES UNLOCKED
+            </div>
+          )}
+          <button
+            onClick={onSignOut}
+            className="w-full flex items-center justify-center gap-2 border border-danger/40 bg-danger/10 text-danger px-3 py-2 label-mono text-xs font-bold hover:bg-danger hover:text-white transition-all"
+          >
+            <LogOut className="w-3.5 h-3.5" /> Sign Out
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── MOBILE BOTTOM NAV BAR (Dashboard) ─── */
+const MOBILE_NAV_SHORTCUTS = [
+  { id: "overview", icon: LayoutDashboard },
+  { id: "intelligence", icon: Brain },
+  { id: "lead-radar", icon: Radio },
+  { id: "voice-fleet", icon: Sparkles },
+  { id: "analytics", icon: BarChart3 },
+];
+
+function MobileBottomNav({
+  activeNav,
+  onSelect,
+  hasCompletedReport,
+  onOpenDrawer,
+}: {
+  activeNav: string;
+  onSelect: (id: string) => void;
+  hasCompletedReport: boolean;
+  onOpenDrawer: () => void;
+}) {
+  return (
+    <nav className="fixed bottom-0 left-0 right-0 z-40 md:hidden border-t border-ink/20 bg-paper/95 backdrop-blur-md shadow-[0_-4px_24px_rgba(0,0,0,0.12)] dark:shadow-[0_-4px_24px_rgba(0,0,0,0.5)]">
+      <div className="flex items-center justify-around px-1 py-1 safe-area-inset-bottom" style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 4px)' }}>
+        {MOBILE_NAV_SHORTCUTS.map(({ id, icon: Icon }) => {
+          const isActive = activeNav === id;
+          const isUnlocked = id === "overview" || id === "intelligence" || hasCompletedReport;
+          return (
+            <button
+              key={id}
+              onClick={() => isUnlocked && onSelect(id)}
+              className={`flex flex-col items-center justify-center gap-0.5 py-1.5 px-3 min-w-[44px] min-h-[44px] transition-all active:scale-90 ${
+                isActive ? "text-violet" : isUnlocked ? "text-muted-foreground" : "text-ink/20"
+              }`}
+            >
+              <Icon className={`w-5 h-5 ${ isActive ? "text-violet" : "" }`} />
+              {isActive && <span className="h-1 w-1 rounded-full bg-violet" />}
+            </button>
+          );
+        })}
+        {/* More / All modules button */}
+        <button
+          onClick={onOpenDrawer}
+          className="flex flex-col items-center justify-center gap-0.5 py-1.5 px-3 min-w-[44px] min-h-[44px] text-muted-foreground active:scale-90 transition-all"
+        >
+          <div className="flex flex-col items-center justify-center gap-0.5">
+            <span className="h-0.5 w-4 bg-current" />
+            <span className="h-0.5 w-4 bg-current" />
+            <span className="h-0.5 w-4 bg-current" />
+          </div>
+        </button>
+      </div>
+    </nav>
   );
 }
 
 /* ─── MAIN DASHBOARD ─── */
 function DashboardPage() {
   const navigate = useNavigate();
-  const { user, profile, session, signOut } = useAuth();
+  const { user, profile, session, signOut, loading: authLoading } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [activeNav, setActiveNav] = useState("intelligence");
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+  const [activeNav, setActiveNav] = useState(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const tabParam = params.get("tab");
+      if (tabParam) return tabParam;
+      const stored = localStorage.getItem("vyaperi_active_nav");
+      if (stored) return stored;
+    }
+    return "overview";
+  });
+
+  const handleSelectNav = (navId: string) => {
+    setActiveNav(navId);
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.setItem("vyaperi_active_nav", navId);
+        const url = new URL(window.location.href);
+        url.searchParams.set("tab", navId);
+        window.history.replaceState(null, "", url.toString());
+      } catch {}
+    }
+  };
   const [voiceTargetLead, setVoiceTargetLead] = useState<any>(null);
   const [reportId, setReportId] = useState<string | null>(() => {
     if (typeof window !== "undefined") {
@@ -1800,6 +2011,18 @@ function DashboardPage() {
     return () => clearInterval(id);
   }, []);
 
+  // Secret Shortcut: Cmd+Shift+G or Ctrl+Shift+G opens the Secret Guardrail Panel
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === "G" || e.key === "g")) {
+        e.preventDefault();
+        handleSelectNav("guardrail");
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
   const userId = user?.id;
 
   useEffect(() => {
@@ -1816,13 +2039,49 @@ function DashboardPage() {
         }
       }
     } catch {}
-    fetchRecents();
+
+    // Clean legacy global cache
+    try {
+      sessionStorage.removeItem("vyaperi_reports_cache");
+    } catch {}
+
+    // Only fetch when we have a settled user ID — avoids double-fire during auth hydration
+    if (userId && userId !== "undefined" && userId !== "null") {
+      try {
+        const userCached = sessionStorage.getItem(`vyaperi_reports_cache_${userId}`);
+        if (userCached) {
+          const parsed = JSON.parse(userCached) as RecentReport[];
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setRecentReports(parsed);
+            const latestDone = parsed.find((r) => r.status === "done" && r.analysis?.company_name);
+            if (latestDone) {
+              setActiveCompanyInfo({
+                name: latestDone.analysis!.company_name!,
+                industry: latestDone.analysis!.industry || "B2B Tech",
+                score: latestDone.analysis!.opportunity_score || 88,
+              });
+              setActiveAnalysis(latestDone.analysis as FullAnalysis);
+            }
+          }
+        }
+      } catch {}
+      fetchRecents();
+    } else {
+      setRecentReports([]);
+      setActiveAnalysis(null);
+      setActiveCompanyInfo({ name: "", industry: "", score: 0 });
+    }
   }, [userId, profile]);
 
   const fetchRecents = async () => {
     try {
       const validUserId = user?.id && user.id !== "undefined" && user.id !== "null" ? user.id : null;
-      const url = validUserId ? `${API_BASE}/api/reports?user_id=${encodeURIComponent(validUserId)}` : `${API_BASE}/api/reports`;
+      if (!validUserId) {
+        setRecentReports([]);
+        setActiveAnalysis(null);
+        return;
+      }
+      const url = `${API_BASE}/api/reports?user_id=${encodeURIComponent(validUserId)}`;
       const headers: Record<string, string> = {};
       if (session?.access_token) {
         headers["Authorization"] = `Bearer ${session.access_token}`;
@@ -1830,8 +2089,13 @@ function DashboardPage() {
       const res = await safeApiFetch(url, { headers });
       if (res.ok) {
         const data = await res.json();
-        setRecentReports(data);
-        const latestDone = data.find((r: any) => r.status === "done" && r.analysis?.company_name);
+        const safeData = Array.isArray(data) ? data : [];
+        setRecentReports(safeData);
+        try {
+          sessionStorage.setItem(`vyaperi_reports_cache_${validUserId}`, JSON.stringify(safeData));
+          sessionStorage.removeItem("vyaperi_reports_cache");
+        } catch {}
+        const latestDone = safeData.find((r: any) => r.status === "done" && r.analysis?.company_name);
         if (latestDone) {
           setActiveCompanyInfo({
             name: latestDone.analysis.company_name,
@@ -1839,6 +2103,8 @@ function DashboardPage() {
             score: latestDone.analysis.opportunity_score || 88,
           });
           setActiveAnalysis(latestDone.analysis);
+        } else {
+          setActiveAnalysis(null);
         }
       }
     } catch {}
@@ -1892,61 +2158,137 @@ function DashboardPage() {
   };
 
   const handleNavigateModule = (moduleId: string) => {
-    setActiveNav(moduleId);
+    handleSelectNav(moduleId);
   };
 
   const navItems = MODULE_REGISTRY.map((mod) => ({
     ...mod,
-    // Enable all modules as soon as any business report has finished
-    isUnlocked: mod.id === "intelligence" || hasCompletedReport,
+    // overview is always unlocked; others unlock after first completed report
+    isUnlocked: mod.id === "overview" || mod.id === "intelligence" || hasCompletedReport,
   }));
+
+  useEffect(() => {
+    if (!authLoading && !user && !session) {
+      navigate({ to: "/login" });
+    }
+  }, [authLoading, user, session, navigate]);
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-paper flex flex-col items-center justify-center p-6 space-y-4">
+        <div className="w-10 h-10 border-2 border-violet border-t-transparent rounded-full animate-spin" />
+        <p className="font-mono text-xs text-muted-foreground uppercase tracking-wider">
+          Initializing Command Session...
+        </p>
+      </div>
+    );
+  }
+
+  if (!user && !session) {
+    return null;
+  }
 
   return (
     <div className="min-h-screen bg-paper text-ink flex flex-col selection:bg-lime selection:text-ink">
+      {/* ── Mobile Drawer ── */}
+      <MobileDashboardDrawer
+        isOpen={mobileDrawerOpen}
+        onClose={() => setMobileDrawerOpen(false)}
+        navItems={navItems}
+        activeNav={activeNav}
+        onSelectNav={handleSelectNav}
+        hasCompletedReport={hasCompletedReport}
+        onSignOut={async () => { await signOut(); navigate({ to: "/login" }); }}
+      />
+
       {/* ── Top Bar ── */}
       <header className="sticky top-0 z-50 border-b border-ink/20 bg-paper/95 backdrop-blur-md">
-        <div className="flex items-center justify-between px-4 py-3 gap-4">
-          <div className="flex items-center gap-3">
+        <div className="flex items-center justify-between px-3 py-2.5 md:px-4 md:py-3 gap-2">
+          {/* Left: hamburger (desktop sidebar toggle) + mobile drawer + logo */}
+          <div className="flex items-center gap-2">
+            {/* Desktop sidebar toggle (hidden on mobile) */}
             <button
               onClick={() => setSidebarOpen(!sidebarOpen)}
-              className="border border-ink/20 bg-secondary p-2 hover:border-violet transition-colors"
+              className="hidden md:flex border border-ink/20 bg-secondary p-2 hover:border-violet transition-colors"
             >
               {sidebarOpen ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
             </button>
+            {/* Mobile drawer trigger */}
+            <button
+              onClick={() => setMobileDrawerOpen(true)}
+              className="md:hidden border border-ink/20 bg-secondary p-2 hover:border-violet transition-colors active:scale-95"
+              aria-label="Open navigation menu"
+            >
+              <div className="flex flex-col items-center justify-center gap-[3px]">
+                <span className="h-0.5 w-3.5 bg-ink" />
+                <span className="h-0.5 w-3.5 bg-ink" />
+                <span className="h-0.5 w-3.5 bg-ink" />
+              </div>
+            </button>
             <Logo />
           </div>
-          <div className="flex items-center gap-4">
+
+          {/* Right: controls — progressively hide on smaller screens */}
+          <div className="flex items-center gap-1.5 sm:gap-3 min-w-0">
             {hasCompletedReport ? (
-              <div className="hidden sm:flex items-center gap-2 border border-lime/40 bg-lime/10 px-3 py-1 text-lime-700 dark:text-lime label-mono text-[10px] font-bold">
-                <Sparkles className="w-3 h-3" /> ALL MODULES UNLOCKED
+              <div className="hidden sm:flex items-center gap-1.5 border border-lime/40 bg-lime/10 px-2 py-1 text-lime-700 dark:text-lime label-mono text-[10px] font-bold whitespace-nowrap">
+                <Sparkles className="w-3 h-3 shrink-0" />
+                <span className="hidden lg:inline">ALL MODULES UNLOCKED</span>
+                <span className="lg:hidden">UNLOCKED</span>
               </div>
             ) : (
-              <div className="hidden sm:flex items-center gap-2 border border-ink/20 px-3 py-1 label-mono text-[10px] text-muted-foreground">
-                <Lock className="w-3 h-3" /> Finish 1 Report to Unlock All
+              <div className="hidden sm:flex items-center gap-1.5 border border-ink/20 px-2 py-1 label-mono text-[10px] text-muted-foreground whitespace-nowrap">
+                <Lock className="w-3 h-3 shrink-0" />
+                <span className="hidden lg:inline">Finish 1 Report to Unlock All</span>
+                <span className="lg:hidden">Run a Report</span>
               </div>
             )}
 
             {greeting.company && (
-              <span className="hidden md:block font-mono text-xs text-muted-foreground">
-                Workspace: <span className="text-ink font-bold">{greeting.company}</span>
+              <span className="hidden xl:block font-mono text-xs text-muted-foreground truncate max-w-[120px]">
+                <span className="text-ink font-bold">{greeting.company}</span>
               </span>
             )}
-            <div className="hidden sm:block border border-ink/20 px-3 py-1.5 font-mono text-[10px] text-muted-foreground">
+
+            {/* Live status dot — only on md+ */}
+            <div className="hidden md:flex items-center gap-1.5">
+              <div className="h-1.5 w-1.5 bg-lime live-dot" />
+              <span className="label-mono text-muted-foreground text-[10px] whitespace-nowrap">All Systems OK</span>
+            </div>
+
+            {/* 🌓 Dark / Light Mode Toggle */}
+            <ThemeToggle className="p-1" />
+
+            {/* 🌐 Multi-Language Switcher */}
+            <LangSwitcher />
+
+            {/* 🛡️ Secret Guardrail & Blacklist Trigger */}
+            <button
+              onClick={() => handleSelectNav("guardrail")}
+              title="Trust & Safety Guardrail (Shortcut: Cmd+Shift+G)"
+              className={`p-1.5 rounded-lg border transition-all text-xs flex items-center gap-1.5 ${
+                activeNav === "guardrail"
+                  ? "border-red-500/50 bg-red-500/10 text-red-500 shadow-sm"
+                  : "border-ink/20 hover:border-red-500/40 hover:bg-secondary text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <ShieldAlert className="w-3.5 h-3.5 text-red-500" />
+              <span className="hidden xl:inline font-mono text-[9px] font-bold uppercase tracking-wider">Shield</span>
+            </button>
+
+            {/* Time — large screens only */}
+            <div className="hidden lg:block border border-ink/20 px-3 py-1.5 font-mono text-[10px] text-muted-foreground">
               <div>SYS.TIME</div>
               <div className="text-ink">{time}</div>
             </div>
-            <div className="flex items-center gap-1.5">
-              <div className="h-1.5 w-1.5 bg-lime live-dot" />
-              <span className="label-mono text-muted-foreground text-[10px]">All Systems Operational</span>
-            </div>
 
             {user && (
-              <div className="flex items-center gap-2 border-l border-ink/20 pl-3">
+              <div className="flex items-center gap-1.5 border-l border-ink/20 pl-1.5 sm:pl-3">
                 <div className="hidden lg:flex flex-col text-right">
-                  <span className="font-mono text-[10px] font-bold text-ink truncate max-w-[140px]">
+                  <span className="font-mono text-[10px] font-bold text-ink truncate max-w-[120px]">
                     {profile?.full_name || user.email?.split("@")[0]}
                   </span>
-                  <span className="font-mono text-[9px] text-muted-foreground truncate max-w-[140px]">
+                  <span className="font-mono text-[9px] text-muted-foreground truncate max-w-[120px]">
                     {profile?.company_name || user.email}
                   </span>
                 </div>
@@ -1956,8 +2298,8 @@ function DashboardPage() {
                     await signOut();
                     navigate({ to: "/login" });
                   }}
-                  title="Sign Out of Supabase Workspace"
-                  className="border border-ink/20 bg-secondary/50 p-1.5 hover:border-danger hover:text-danger hover:bg-danger/10 transition-colors"
+                  title="Sign Out"
+                  className="border border-ink/20 bg-secondary/50 p-1.5 hover:border-danger hover:text-danger hover:bg-danger/10 transition-colors min-w-[36px] min-h-[36px] flex items-center justify-center"
                 >
                   <LogOut className="w-3.5 h-3.5" />
                 </button>
@@ -1967,12 +2309,20 @@ function DashboardPage() {
         </div>
       </header>
 
+      {/* ── Mobile Bottom Nav ── */}
+      <MobileBottomNav
+        activeNav={activeNav}
+        onSelect={handleSelectNav}
+        hasCompletedReport={hasCompletedReport}
+        onOpenDrawer={() => setMobileDrawerOpen(true)}
+      />
+
       <div className="flex flex-1 overflow-hidden">
-        {/* ── Sidebar ── */}
+        {/* ── Sidebar (hidden on mobile, shown on md+) ── */}
         <aside
           className={`${
             sidebarOpen ? "w-60" : "w-14"
-          } shrink-0 border-r border-ink/20 bg-secondary/20 flex flex-col transition-all duration-200 overflow-hidden`}
+          } hidden md:flex shrink-0 border-r border-ink/20 bg-secondary/20 flex-col transition-all duration-200 overflow-hidden`}
         >
           <nav className="flex-1 p-2 space-y-1 pt-4">
             {navItems.map((item) => {
@@ -1982,7 +2332,7 @@ function DashboardPage() {
                 <button
                   key={item.id}
                   onClick={() => {
-                    if (isUnlocked) setActiveNav(item.id);
+                    if (isUnlocked) handleSelectNav(item.id);
                   }}
                   className={`w-full flex items-center gap-3 px-3 py-2.5 transition-all group ${
                     isActive
@@ -2026,7 +2376,7 @@ function DashboardPage() {
                 <button
                   key={r.id}
                   onClick={() => {
-                    setActiveNav("intelligence");
+                    handleSelectNav("intelligence");
                     handleSelectReport(r);
                   }}
                   className="w-full text-left border border-transparent hover:border-ink/20 p-2 hover:bg-secondary transition-colors group min-w-0 overflow-hidden"
@@ -2055,8 +2405,20 @@ function DashboardPage() {
         </aside>
 
         {/* ── Main Content Area ── */}
-        <main className="flex-1 overflow-y-auto min-w-0">
-          <div className="max-w-[1250px] mx-auto p-6 space-y-6">
+        <main className="flex-1 overflow-y-auto min-w-0 pb-16 md:pb-0">
+          <div className="max-w-[1250px] mx-auto p-3 sm:p-4 md:p-6 space-y-4 md:space-y-6">
+            {/* 0. Command Center Overview */}
+            {activeNav === "overview" && (
+              <OverviewDashboard
+                onNavigate={(mod) => {
+                  if (mod === "intelligence") {
+                    setView("intake");
+                  }
+                  handleSelectNav(mod);
+                }}
+              />
+            )}
+
             {/* 1. Intelligence Suite View */}
             {activeNav === "intelligence" && (
               <div className="space-y-6">
@@ -2232,7 +2594,17 @@ function DashboardPage() {
               />
             )}
 
-            {/* 6. Analytics View */}
+            {/* 6. WhatsApp Business Gateway View */}
+            {activeNav === "whatsapp" && (
+              <WhatsAppModule companyName={activeCompanyInfo.name} />
+            )}
+
+            {/* 7. CRM Sync & Pipeline View */}
+            {activeNav === "crm" && (
+              <CRMModule companyName={activeCompanyInfo.name} />
+            )}
+
+            {/* 8. Analytics View */}
             {activeNav === "analytics" && (
               <AnalyticsModule
                 analysis={activeAnalysis}
@@ -2243,6 +2615,11 @@ function DashboardPage() {
 
             {/* 5. Settings View */}
             {activeNav === "settings" && <SettingsModule companyName={activeCompanyInfo.name} />}
+
+            {/* 9. Secret Hate Speech Guardrail & Blocklist Panel */}
+            {activeNav === "guardrail" && (
+              <SecretGuardrailPanel onClose={() => handleSelectNav("overview")} />
+            )}
           </div>
         </main>
       </div>

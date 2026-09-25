@@ -8,6 +8,8 @@ Provides endpoints for:
 - GET  /api/profile/{user_id} — Get profile by ID
 """
 
+import asyncio
+from datetime import datetime, timezone
 import logging
 from typing import Any, Dict, Optional
 from fastapi import APIRouter, Header, HTTPException, Query, status
@@ -15,6 +17,7 @@ from pydantic import BaseModel, ConfigDict
 
 from app.core import auth_middleware
 from app.core import database as db
+from app.services import email_service
 
 logger = logging.getLogger(__name__)
 
@@ -85,8 +88,29 @@ async def get_profile(
             "avatar_url": meta.get("avatar_url") or meta.get("picture") or "",
             "role": "owner",
             "onboarding_completed": bool(meta.get("onboarding_completed", False)),
+            "greeting_email_sent": False,
         }
         profile = await db.upsert_profile(auth_user.id, default_profile)
+
+    # If greeting email has not yet been sent to this user's registered email, trigger it
+    if profile and not profile.get("greeting_email_sent"):
+        target_email = profile.get("email") or auth_user.email
+        if target_email:
+            try:
+                asyncio.create_task(
+                    email_service.send_greeting_email(
+                        to_email=target_email,
+                        user_name=profile.get("full_name"),
+                        company_name=profile.get("company_name"),
+                    )
+                )
+                await db.update_profile(auth_user.id, {
+                    "greeting_email_sent": True,
+                    "greeting_email_sent_at": datetime.now(timezone.utc).isoformat(),
+                })
+                profile["greeting_email_sent"] = True
+            except Exception as greet_err:
+                logger.debug(f"Could not auto-dispatch greeting email in get_profile: {greet_err}")
 
     return profile
 

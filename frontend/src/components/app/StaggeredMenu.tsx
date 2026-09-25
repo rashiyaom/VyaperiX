@@ -5,6 +5,7 @@ import { ArrowUpRight, Radio, X } from "lucide-react";
 import { Logo } from "@/components/site/Chrome";
 import { LangSwitcher, useLang } from "@/components/app/lang";
 import { ThemeToggle } from "@/components/app/theme";
+import { useAuth } from "@/lib/auth";
 
 export interface MenuItem {
   label: string;
@@ -58,6 +59,7 @@ export default function StaggeredMenu({
   const [isOpen, setIsOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const { t } = useLang();
+  const { user, signOut } = useAuth();
   const location = useLocation();
 
   useEffect(() => {
@@ -211,13 +213,36 @@ export default function StaggeredMenu({
 
             {/* Quick Action Button */}
             <div className="pt-3">
-              <Link
-                to="/login"
-                onClick={closeMenu}
-                className="flex items-center justify-center gap-2 w-full border-2 border-lime bg-lime text-lime-foreground py-3 sm:py-3.5 font-mono text-xs sm:text-sm font-black uppercase hover:bg-white hover:border-white hover:text-black transition-all shadow-xl active:scale-95"
-              >
-                {isDashboard ? "Sign Out of Console ➔" : "Start Free Trial ↗"}
-              </Link>
+              {isDashboard || user ? (
+                <div className="space-y-2">
+                  <Link
+                    to="/dashboard"
+                    onClick={closeMenu}
+                    className="flex items-center justify-center gap-2 w-full border-2 border-lime bg-lime text-lime-foreground py-3 sm:py-3.5 font-mono text-xs sm:text-sm font-black uppercase hover:bg-white hover:border-white hover:text-black transition-all shadow-xl active:scale-95"
+                  >
+                    Open Console ➔
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await signOut();
+                      closeMenu();
+                    }}
+                    className="flex items-center justify-center gap-2 w-full border border-white/20 bg-white/5 text-white/90 py-2.5 font-mono text-xs uppercase hover:bg-destructive hover:text-white transition-all cursor-pointer"
+                  >
+                    Sign Out ({user?.email || "Current User"})
+                  </button>
+                </div>
+              ) : (
+                <Link
+                  to="/login"
+                  search={{ tab: "Signup" }}
+                  onClick={closeMenu}
+                  className="flex items-center justify-center gap-2 w-full border-2 border-lime bg-lime text-lime-foreground py-3 sm:py-3.5 font-mono text-xs sm:text-sm font-black uppercase hover:bg-white hover:border-white hover:text-black transition-all shadow-xl active:scale-95"
+                >
+                  Start Free Trial ↗
+                </Link>
+              )}
             </div>
           </div>
 

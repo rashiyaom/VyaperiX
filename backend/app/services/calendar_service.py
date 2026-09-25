@@ -57,13 +57,98 @@ Rules:
 """
 
 
-def generate_google_meet_url() -> str:
-    """Generate a realistic Google Meet URL structure (meet.google.com/xxx-xxxx-xxx)."""
-    chars = string.ascii_lowercase
-    part1 = "".join(random.choices(chars, k=3))
-    part2 = "".join(random.choices(chars, k=4))
-    part3 = "".join(random.choices(chars, k=3))
-    return f"https://meet.google.com/{part1}-{part2}-{part3}"
+def generate_live_video_room(company_name: Optional[str] = None, meeting_id: Optional[str] = None) -> str:
+    """
+    Generate an authentic, instantly functional Jitsi Meet video room.
+    Works in any browser on mobile and desktop without downloading apps or logging in.
+    Supports real camera, mic, screen share, and group video call.
+    """
+    clean_company = re.sub(r"[^a-zA-Z0-9]", "", company_name or "VyaperiX")[:16] or "VyaperiX"
+    short_uid = (meeting_id or uuid.uuid4().hex)[:8]
+    room_name = f"VyaperiX-{clean_company}-{short_uid}"
+    return f"https://meet.jit.si/{room_name}"
+
+
+def generate_google_meet_url(company_name: Optional[str] = None) -> str:
+    """Generate an authentic live video room (Jitsi Meet) for the session."""
+    return generate_live_video_room(company_name)
+
+
+async def check_calendar_conflict(
+    start_time_iso: str,
+    end_time_iso: str,
+    user_id: Optional[str] = None,
+    exclude_event_id: Optional[str] = None,
+) -> dict:
+    """
+    Check if a proposed slot conflicts with any existing active calendar event.
+    If a conflict exists, returns conflict details and calculates the next available free 30-min slot.
+    """
+    try:
+        req_start = datetime.fromisoformat(start_time_iso.replace("Z", "+00:00"))
+        req_end = datetime.fromisoformat(end_time_iso.replace("Z", "+00:00"))
+    except Exception as e:
+        logger.warning(f"Error parsing slot timestamps for conflict check: {e}")
+        return {"has_conflict": False, "conflicting_event": None}
+
+    events = await db.list_calendar_events(user_id=user_id, limit=500)
+    conflicting_event = None
+
+    for ev in events:
+        if ev.get("id") == exclude_event_id:
+            continue
+        ev_status = (ev.get("status") or "").lower()
+        if ev_status in ("cancelled", "declined"):
+            continue
+
+        ev_start_str = ev.get("start_time")
+        ev_end_str = ev.get("end_time")
+        if not ev_start_str or not ev_end_str:
+            continue
+
+        try:
+            ev_start = datetime.fromisoformat(ev_start_str.replace("Z", "+00:00"))
+            ev_end = datetime.fromisoformat(ev_end_str.replace("Z", "+00:00"))
+
+            # Overlap condition: max(start1, start2) < min(end1, end2)
+            if max(req_start, ev_start) < min(req_end, ev_end):
+                conflicting_event = {
+                    "id": ev.get("id"),
+                    "title": ev.get("title") or "Scheduled Meeting",
+                    "customer_name": ev.get("customer_name") or "Customer",
+                    "start_time": ev_start_str,
+                    "end_time": ev_end_str,
+                    "status": ev.get("status"),
+                }
+                break
+        except Exception:
+            continue
+
+    if not conflicting_event:
+        return {"has_conflict": False, "conflicting_event": None}
+
+    # Propose next available slot (look 30 minutes after conflicting event's end)
+    suggested_start = None
+    suggested_end = None
+    try:
+        conf_end = datetime.fromisoformat(conflicting_event["end_time"].replace("Z", "+00:00"))
+        rem = conf_end.minute % 30
+        if rem != 0:
+            conf_end += timedelta(minutes=(30 - rem))
+        duration = req_end - req_start
+        if duration.total_seconds() <= 0:
+            duration = timedelta(minutes=30)
+        suggested_start = conf_end.isoformat()
+        suggested_end = (conf_end + duration).isoformat()
+    except Exception:
+        pass
+
+    return {
+        "has_conflict": True,
+        "conflicting_event": conflicting_event,
+        "suggested_start_iso": suggested_start,
+        "suggested_end_iso": suggested_end,
+    }
 
 
 def _format_iso(dt: datetime) -> str:
@@ -147,8 +232,8 @@ Full Conversation Transcript:
             start_iso = start_dt.isoformat()
             end_iso = (start_dt + timedelta(minutes=duration)).isoformat()
 
-        meeting_type = parsed.get("meeting_type") or "google_meet"
-        meet_url = generate_google_meet_url() if meeting_type == "google_meet" else None
+        meeting_type = parsed.get("meeting_type") or "live_video"
+        meet_url = generate_live_video_room(business_name, call_id)
 
         extracted = {
             "customer_name": parsed.get("customer_name") or customer_name or "Lead",
@@ -161,10 +246,10 @@ Full Conversation Transcript:
             "notes": parsed.get("notes") or "",
             "start_time": start_iso,
             "end_time": end_iso,
-            "meeting_type": meeting_type,
+            "meeting_type": "live_video",
             "meet_url": meet_url,
             "reminder_minutes": int(parsed.get("reminder_minutes") or 15),
-            "status": "scheduled",
+            "status": "new_booking",
             "call_id": call_id,
         }
         return extracted
@@ -275,7 +360,8 @@ async def auto_book_meeting_from_call(
     google_access_token: Optional[str] = None,
 ) -> Optional[dict]:
     """
-    Extracts meeting details from call transcript, creates calendar event, and optionally syncs to Google.
+    Extracts meeting details from call transcript, checks calendar conflicts,
+    generates live video room, and creates a 'new_booking' event awaiting sales agent confirmation.
     """
     meeting_info = await extract_meeting_from_transcript(
         transcript=transcript,
@@ -288,33 +374,43 @@ async def auto_book_meeting_from_call(
     if not meeting_info:
         return None
 
-    # Google Sync or Meet URL generation
-    sync_res = await sync_event_to_google_calendar(meeting_info, google_access_token)
-    if sync_res.get("meet_url"):
-        meeting_info["meet_url"] = sync_res["meet_url"]
-    if sync_res.get("google_event_id"):
-        meeting_info["google_event_id"] = sync_res["google_event_id"]
+    # Ensure authentic live Jitsi Meet room is generated
+    if not meeting_info.get("meet_url"):
+        meeting_info["meet_url"] = generate_live_video_room(business_name or meeting_info.get("company_name"), call_id)
+
+    # Calendar Slot Conflict Checking
+    conflict_res = await check_calendar_conflict(
+        start_time_iso=meeting_info["start_time"],
+        end_time_iso=meeting_info["end_time"],
+        user_id=user_id,
+    )
+    meeting_info["has_conflict"] = conflict_res.get("has_conflict", False)
+    if conflict_res.get("has_conflict"):
+        meeting_info["conflict_details"] = conflict_res.get("conflicting_event")
+        meeting_info["suggested_alternate_start"] = conflict_res.get("suggested_start_iso")
+        meeting_info["suggested_alternate_end"] = conflict_res.get("suggested_end_iso")
+        logger.warning(
+            f"Calendar conflict detected for call {call_id}: requested slot overlaps with event "
+            f"'{conflict_res['conflicting_event'].get('title')}'. Alternate suggested: {conflict_res.get('suggested_start_iso')}"
+        )
+
+    # Attach complete transcript and metadata for the sales agent to review before ticking
+    meeting_info["transcript"] = transcript
+    meeting_info["status"] = "new_booking"
+    meeting_info["whatsapp_status"] = "pending_agent_tick"
+
+    # Optional Google Sync if access token was provided
+    if google_access_token:
+        sync_res = await sync_event_to_google_calendar(meeting_info, google_access_token)
+        if sync_res.get("google_event_id"):
+            meeting_info["google_event_id"] = sync_res["google_event_id"]
+
     event_id = await db.create_calendar_event(meeting_info, user_id=user_id)
     meeting_info["id"] = event_id
-    logger.info(f"Successfully auto-booked calendar event {event_id} for call {call_id} (Customer: {customer_name})")
-
-    # Automatically dispatch WhatsApp confirmation with Google Meet link & agenda
-    target_phone = meeting_info.get("customer_phone") or customer_phone
-    if target_phone:
-        try:
-            from app.services import whatsapp_service
-            wa_res = await whatsapp_service.send_meeting_confirmation(
-                customer_name=meeting_info.get("customer_name") or customer_name or "there",
-                customer_phone=target_phone,
-                business_name=business_name or meeting_info.get("company_name") or "Vyepari X",
-                start_time=meeting_info.get("start_time") or "",
-                meet_url=meeting_info.get("meet_url") or "",
-                agenda=meeting_info.get("agenda") or meeting_info.get("description") or "",
-                requirements=meeting_info.get("notes") or "",
-            )
-            meeting_info["whatsapp_status"] = "sent" if wa_res.get("success") else "failed"
-            logger.info(f"WhatsApp meeting confirmation dispatch for event {event_id}: {wa_res.get('success')}")
-        except Exception as wa_err:
-            logger.warning(f"Error dispatching WhatsApp meeting confirmation for event {event_id}: {wa_err}")
+    logger.info(
+        f"Successfully created new booking {event_id} for call {call_id} "
+        f"(Customer: {customer_name}, Conflict: {meeting_info['has_conflict']}). "
+        f"Awaiting sales agent confirmation in website dashboard."
+    )
 
     return meeting_info

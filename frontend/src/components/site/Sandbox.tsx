@@ -396,63 +396,70 @@ export function Sandbox() {
   return (
     <div className="border border-ink bg-card text-ink shadow-xl rounded-none">
       {/* Scenario Selector Tab Bar */}
-      <div className="flex flex-wrap items-center justify-between border-b border-ink/20 bg-secondary px-4 py-3 gap-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="label-mono text-muted-foreground text-xs mr-1">// Test Scenarios:</span>
-          {SCENARIOS.map((s) => (
-            <button
-              key={s.id}
-              onClick={() => {
-                reset();
-                setScenario(s);
-              }}
-              className={`px-3 py-1.5 font-mono text-xs transition-all border flex items-center gap-1.5 ${
-                scenario.id === s.id
-                  ? "bg-ink text-paper border-ink font-bold shadow"
-                  : "bg-paper text-ink border-ink/20 hover:border-violet"
-              }`}
-            >
-              <span>{s.label}</span>
-              <span
-                className={`text-[9px] px-1.5 py-0.2 border uppercase font-mono ${
+      <div className="border-b border-ink/20 bg-secondary">
+        <div className="flex items-center justify-between px-3 py-2.5 sm:px-4 sm:py-3 gap-2 flex-wrap">
+          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar flex-1 min-w-0 pb-0.5">
+            <span className="label-mono text-muted-foreground text-xs mr-1 shrink-0">// Scenarios:</span>
+            {SCENARIOS.map((s) => (
+              <button
+                key={s.id}
+                onClick={() => {
+                  reset();
+                  setScenario(s);
+                }}
+                className={`px-2.5 py-1.5 font-mono text-xs transition-all border flex items-center gap-1 shrink-0 ${
                   scenario.id === s.id
-                    ? s.mode === "calling_only"
-                      ? "bg-violet/30 text-paper border-violet/60"
-                      : "bg-lime/20 text-lime border-lime/50"
-                    : s.mode === "calling_only"
-                      ? "bg-violet/10 text-violet border-violet/30"
-                      : "bg-emerald-600/10 text-emerald-700 dark:text-lime border-emerald-500/30"
+                    ? "bg-ink text-paper border-ink font-bold shadow"
+                    : "bg-paper text-ink border-ink/20 hover:border-violet"
                 }`}
               >
-                {s.mode === "calling_only" ? "Calling Only" : "Leads + Calling"}
-              </span>
-            </button>
-          ))}
-        </div>
+                <span className="hidden sm:inline">{s.label}</span>
+                <span className="sm:hidden">{s.label.split(" ")[0]}</span>
+                <span
+                  className={`text-[9px] px-1 py-0.5 border uppercase font-mono shrink-0 ${
+                    scenario.id === s.id
+                      ? s.mode === "calling_only"
+                        ? "bg-violet/30 text-paper border-violet/60"
+                        : "bg-lime/20 text-lime border-lime/50"
+                      : s.mode === "calling_only"
+                        ? "bg-violet/10 text-violet border-violet/30"
+                        : "bg-emerald-600/10 text-emerald-700 dark:text-lime border-emerald-500/30"
+                  }`}
+                >
+                  {s.mode === "calling_only" ? "CSV" : "Radar"}
+                </span>
+              </button>
+            ))}
+          </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            onClick={reset}
-            className="border border-ink/30 bg-paper p-2 font-mono text-xs hover:bg-secondary transition-colors"
-            title="Reset Simulation"
-          >
-            <RotateCcw className="h-3.5 w-3.5" />
-          </button>
-          <button
-            onClick={run}
-            disabled={running}
-            className="inline-flex items-center gap-2 border border-ink bg-lime px-4 py-2 font-mono text-xs font-bold text-lime-foreground hover:bg-ink hover:text-paper transition-all disabled:opacity-50 active:scale-95 shadow-sm"
-          >
-            {running ? (
-              <>
-                <Sparkles className="h-3.5 w-3.5 animate-spin" /> Simulating 11 Stages…
-              </>
-            ) : (
-              <>
-                <Play className="h-3.5 w-3.5 fill-current" /> Run 11-Step Simulation
-              </>
-            )}
-          </button>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              onClick={reset}
+              className="border border-ink/30 bg-paper p-2 font-mono text-xs hover:bg-secondary transition-colors"
+              title="Reset Simulation"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+            </button>
+            <button
+              onClick={run}
+              disabled={running}
+              className="inline-flex items-center gap-1.5 border border-ink bg-lime px-3 sm:px-4 py-2 font-mono text-xs font-bold text-lime-foreground hover:bg-ink hover:text-paper transition-all disabled:opacity-50 active:scale-95 shadow-sm whitespace-nowrap"
+            >
+              {running ? (
+                <>
+                  <Sparkles className="h-3.5 w-3.5 animate-spin" />
+                  <span className="hidden sm:inline">Simulating 11 Stages…</span>
+                  <span className="sm:hidden">Running…</span>
+                </>
+              ) : (
+                <>
+                  <Play className="h-3.5 w-3.5 fill-current" />
+                  <span className="hidden sm:inline">Run 11-Step Simulation</span>
+                  <span className="sm:hidden">Run Sim</span>
+                </>
+              )}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -477,8 +484,69 @@ export function Sandbox() {
         </div>
       </div>
 
-      {/* 11 Stage Interactive Pipeline Flow Nodes */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-11 gap-px bg-ink/15 border-b border-ink/20">
+      {/* Mobile Swipeable Stage Carousel (< sm) */}
+      <div className="sm:hidden border-b border-ink/20 bg-secondary/20 p-3 space-y-2">
+        <div className="flex items-center justify-between font-mono text-[10px] text-muted-foreground px-0.5">
+          <span className="flex items-center gap-1.5 font-bold text-violet">
+            <span>Stage Pipeline</span>
+            <span className="text-[9px] px-1.5 py-0.2 border border-violet/30 bg-violet/10 font-bold">
+              11 STAGES
+            </span>
+          </span>
+          <span className="flex items-center gap-1 text-[9px] text-muted-foreground">
+            <span>← Swipe stages →</span>
+          </span>
+        </div>
+
+        <div className="flex overflow-x-auto snap-x snap-mandatory gap-2.5 pb-2 pt-0.5 no-scrollbar">
+          {STAGES.map(([code, title, desc], i) => {
+            const state = states[i]!;
+            const isCurrent = step === i && running;
+            return (
+              <div
+                key={code}
+                className={`min-w-[175px] max-w-[195px] shrink-0 snap-start p-3 border transition-all flex flex-col justify-between shadow-sm ${
+                  isCurrent
+                    ? "border-violet bg-violet/10 ring-1 ring-violet shadow-md"
+                    : state === "pass"
+                    ? "border-lime/60 bg-paper dark:bg-card"
+                    : "border-ink/20 bg-paper dark:bg-card"
+                }`}
+              >
+                <div>
+                  <div className="flex items-center justify-between font-mono text-[10px]">
+                    <span className="font-bold text-violet">#{code}</span>
+                    <span
+                      className={`px-1.5 py-0.5 text-[8px] font-bold uppercase rounded-none border ${
+                        state === "pass"
+                          ? "bg-lime text-lime-foreground border-lime"
+                          : state === "running"
+                          ? "bg-violet text-white border-violet animate-pulse"
+                          : state === "hold"
+                          ? "bg-violet/20 text-violet border-violet"
+                          : state === "stop"
+                          ? "bg-danger text-white border-danger"
+                          : "bg-secondary text-muted-foreground border-ink/10"
+                      }`}
+                    >
+                      {state}
+                    </span>
+                  </div>
+                  <div className="mt-2 font-display text-xs font-bold text-ink leading-tight">
+                    {title}
+                  </div>
+                </div>
+                <div className="mt-2 font-mono text-[9px] text-muted-foreground line-clamp-2 leading-tight">
+                  {desc}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Desktop 11 Stage Grid (>= sm) */}
+      <div className="hidden sm:grid sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-11 gap-px bg-ink/15 border-b border-ink/20">
         {STAGES.map(([code, title, desc], i) => {
           const state = states[i]!;
           const isCurrent = step === i && running;

@@ -21,6 +21,7 @@ if sys.platform == "win32":
     except Exception:
         pass
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from typing import List, Optional
 from urllib.parse import urlparse
 
@@ -44,6 +45,11 @@ from app.routers import calendar_router
 from app.routers import profile_router
 from app.routers import whatsapp_router
 from app.routers import demo_voice_router
+from app.routers import prospecting_router
+from app.routers import crm_router
+from app.routers import email_router
+from app.routers import calendly_router
+from app.routers import guardrail_router
 from app.services.search.router import get_search_router
 from config.domain_trust import classify_and_filter, SeedUrl
 
@@ -97,12 +103,29 @@ app.include_router(demo_voice_router.router, prefix="/api/demo-voice", tags=["We
 # Mount User Profile Router (backed by MongoDB)
 app.include_router(profile_router.router, prefix="/api/profile", tags=["User Profile"])
 
+# Mount Autonomous Prospecting & Market Radar Router (Apollo + DuckDuckGo + Groq)
+app.include_router(prospecting_router.router, prefix="/api/prospecting", tags=["Autonomous Prospecting & Radar"])
+
+# Mount CRM & Pipeline Router (HubSpot + Universal Webhook)
+app.include_router(crm_router.router, prefix="/api/crm", tags=["CRM & Pipeline"])
+
+# Mount Email Notifications Router (Greeting & Meeting Confirmation)
+app.include_router(email_router.router, prefix="/api/email", tags=["Email Notifications"])
+
+# Mount Calendly Integration Router
+app.include_router(calendly_router.router, prefix="/api/calendly", tags=["Calendly Integration"])
+
+# Mount Multi-Lingual Speech Guardrail & Blocklist Router
+app.include_router(guardrail_router.router, prefix="/api/guardrail", tags=["Safety Guardrail & Blocklist"])
+
 # Also expose Vapi, Sarvam & Tavus Webhooks and Outbound at root path level for compatibility
 app.add_api_route("/webhook/vapi/custom-voice", voice_router.vapi_custom_voice_webhook, methods=["GET", "POST", "HEAD"], tags=["Voice Fleet Webhook"])
 app.add_api_route("/webhook/vapi", voice_router.vapi_webhook, methods=["POST"], tags=["Voice Fleet Webhook"])
 app.add_api_route("/webhook/tavus", video_router.tavus_webhook, methods=["POST"], tags=["Video Sales Agent Webhook"])
 app.add_api_route("/sarvam/webhook", voice_router.sarvam_webhook, methods=["POST"], tags=["Sarvam Webhook"])
 app.add_api_route("/call/outbound", voice_router.direct_outbound_call, methods=["POST"], tags=["Sarvam Outbound"])
+# Public Calendly webhook (invitee.created / invitee.canceled)
+app.add_api_route("/webhook/calendly", calendly_router.receive_calendly_webhook, methods=["POST"], tags=["Calendly Webhook"])
 
 
 # ─────────────────────────── Calls Compatibility Endpoints ───────────────
@@ -194,10 +217,21 @@ async def register_user(payload: RegisterRequest):
                     "industry": payload.industry or "SaaS / Technology",
                     "onboarding_completed": False,
                     "role": "owner",
+                    "greeting_email_sent": True,
+                    "greeting_email_sent_at": datetime.now(timezone.utc).isoformat(),
                 }
             )
+            # Dispatch welcome / greeting email to the registered email address
+            from app.services import email_service
+            asyncio.create_task(
+                email_service.send_greeting_email(
+                    to_email=email_clean,
+                    user_name=payload.full_name or "",
+                    company_name=payload.company_name or "My Enterprise",
+                )
+            )
         except Exception as profile_err:
-            logger.warning(f"Could not initialize MongoDB profile for {user_id}: {profile_err}")
+            logger.warning(f"Could not initialize MongoDB profile or send greeting for {user_id}: {profile_err}")
 
         return {
             "success": True,
@@ -242,8 +276,30 @@ async def get_current_user_profile(
                 "avatar_url": meta.get("avatar_url") or meta.get("picture") or "",
                 "role": "owner",
                 "onboarding_completed": bool(meta.get("onboarding_completed", False)),
+                "greeting_email_sent": False,
             }
         )
+
+    # If greeting email has not been sent to this user's registered email, trigger it now
+    if profile and not profile.get("greeting_email_sent"):
+        target_email = profile.get("email") or auth_user.email
+        if target_email:
+            try:
+                from app.services import email_service
+                asyncio.create_task(
+                    email_service.send_greeting_email(
+                        to_email=target_email,
+                        user_name=profile.get("full_name") or (auth_user.user_metadata or {}).get("full_name"),
+                        company_name=profile.get("company_name") or (auth_user.user_metadata or {}).get("company_name"),
+                    )
+                )
+                await db.update_profile(auth_user.id, {
+                    "greeting_email_sent": True,
+                    "greeting_email_sent_at": datetime.now(timezone.utc).isoformat(),
+                })
+                profile["greeting_email_sent"] = True
+            except Exception as greet_err:
+                logger.debug(f"Greeting auto-send note: {greet_err}")
 
     return {
         "id": auth_user.id,
@@ -735,6 +791,8 @@ async def list_reports(
             pass
     if not resolved_user_id and user_id:
         resolved_user_id = user_id
+    if not resolved_user_id:
+        return []
     return await db.list_reports(user_id=resolved_user_id, limit=50)
 
 

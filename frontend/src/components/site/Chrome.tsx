@@ -39,8 +39,11 @@ export function Logo({ className = "" }: { className?: string }) {
   );
 }
 
+import { useAuth } from "@/lib/auth";
+
 export function SiteHeader() {
   const { t } = useLang();
+  const { user, signOut } = useAuth();
   const [time, setTime] = useState("--:--:--");
   const [scrolled, setScrolled] = useState(false);
 
@@ -52,7 +55,10 @@ export function SiteHeader() {
   }, []);
 
   useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 4);
+    const onScroll = () => {
+      setScrolled(window.scrollY > 20);
+    };
+    onScroll();
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
@@ -63,7 +69,9 @@ export function SiteHeader() {
     { label: t("site.voice"), href: "/#voice", badge: "Real Voice" },
     { label: t("site.capabs"), href: "/#capabilities" },
     { label: "Intelligence Suite", href: "/scraper", badge: "New" },
-    { label: "Sign In", href: "/login", badge: "Trial" },
+    user
+      ? { label: "Command Console", href: "/dashboard", badge: "Active" }
+      : { label: "Sign In", href: "/login", badge: "Trial" },
   ];
 
   const mobileMenuItems: MenuItem[] = NAV.map((item) => ({
@@ -72,14 +80,16 @@ export function SiteHeader() {
     badge: item.badge,
   }));
 
+  const headerClasses = [
+    "sticky top-0 z-50 w-full max-w-full transition-all duration-300",
+    "bg-paper/85 dark:bg-[#0D0E14]/85 backdrop-blur-2xl border-b border-ink/20 shadow-[0_10px_35px_rgba(0,0,0,0.08)] dark:shadow-[0_10px_35px_rgba(0,0,0,0.5)] dark:border-white/15",
+    scrolled ? "py-1" : "py-0",
+  ].join(" ");
+
   return (
     <header
-      className={`sticky top-0 z-50 w-full max-w-full transition-all duration-300 ${
-        scrolled
-          ? "bg-paper/70 dark:bg-[#0D0E14]/75 backdrop-blur-2xl border-b border-ink/20 shadow-[0_10px_35px_rgba(0,0,0,0.09)] dark:shadow-[0_10px_35px_rgba(0,0,0,0.5)] dark:border-white/15 py-1"
-          : "bg-paper/95 dark:bg-[#0D0E14]/95 border-b border-ink/15 backdrop-blur-md py-0"
-      }`}
-      style={{ WebkitBackdropFilter: scrolled ? "blur(24px)" : "blur(12px)" }}
+      className={headerClasses}
+      style={{ WebkitBackdropFilter: "blur(24px)" }}
     >
       <div className="mx-auto flex max-w-[1400px] items-center justify-between gap-2 px-3 py-2.5 sm:px-6 sm:py-3 lg:px-8 w-full">
         {/* Left: Logo & Desktop Navigation */}
@@ -110,13 +120,35 @@ export function SiteHeader() {
             <div className="text-ink">{time}</div>
           </div>
 
-          <Link
-            to="/login"
-            className="hidden sm:inline-flex items-center gap-1.5 border border-ink bg-ink px-3 py-2 sm:px-4 sm:py-2.5 label-mono text-paper transition-all hover:border-violet hover:bg-violet active:scale-95 whitespace-nowrap text-xs font-bold"
-          >
-            <span>{t("site.starttrial")}</span>
-            <ArrowUpRight className="h-3.5 w-3.5 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
-          </Link>
+          {user ? (
+            <div className="hidden sm:flex items-center gap-2">
+              <Link
+                to="/dashboard"
+                className="inline-flex items-center gap-1.5 border border-ink bg-lime text-black px-3 py-2 sm:px-4 sm:py-2.5 label-mono transition-all hover:bg-white hover:text-black active:scale-95 whitespace-nowrap text-xs font-black shadow-sm"
+              >
+                <span className="w-2 h-2 rounded-full bg-black animate-pulse" />
+                <span>Open Console</span>
+                <ArrowUpRight className="h-3.5 w-3.5" />
+              </Link>
+              <button
+                type="button"
+                onClick={() => signOut()}
+                title="Sign Out"
+                className="inline-flex items-center border border-ink/20 bg-card hover:bg-destructive hover:text-white px-2.5 py-2 label-mono text-[10px] font-bold text-muted-foreground transition-all cursor-pointer"
+              >
+                Sign Out
+              </button>
+            </div>
+          ) : (
+            <Link
+              to="/login"
+              search={{ tab: "Signup" }}
+              className="hidden sm:inline-flex items-center gap-1.5 border border-ink bg-ink px-3 py-2 sm:px-4 sm:py-2.5 label-mono text-paper transition-all hover:border-violet hover:bg-violet active:scale-95 whitespace-nowrap text-xs font-bold"
+            >
+              <span>{t("site.starttrial")}</span>
+              <ArrowUpRight className="h-3.5 w-3.5 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+            </Link>
+          )}
 
           {/* 🍔 Mobile Staggered Menu Drawer */}
           <div className="lg:hidden">
@@ -127,6 +159,7 @@ export function SiteHeader() {
     </header>
   );
 }
+
 
 export function SiteFooter() {
   const { t } = useLang();

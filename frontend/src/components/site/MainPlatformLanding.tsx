@@ -12,6 +12,7 @@ import {
   Users,
   Globe,
   Radio,
+  Volume2,
   Play,
 } from "lucide-react";
 import { useState, useEffect } from "react";
@@ -23,6 +24,7 @@ import { VoiceAgentSynthesizerWidget, HeroVoicePreview } from "@/components/app/
 import { ScrollProgressBar, ScrollReveal } from "@/components/app/scroll-reveal";
 import { PipelineCarousel } from "@/components/site/PipelineCarousel";
 import { BharatSignalMap } from "@/components/site/BharatSignalMap";
+import { useAuth } from "@/lib/auth";
 
 const MODULES = [
   {
@@ -125,6 +127,84 @@ const CAPABILITIES = [
   },
 ];
 
+const PROTOCOL_TRANSCRIPTS: Record<
+  string,
+  { title: string; agent: string; lead: string; outcome: string; lines: [string, string][] }
+> = {
+  hi: {
+    title: "Hindi Voice Protocol — Ananya Sharma (Northbridge Infra)",
+    agent: "Saanvi",
+    lead: "Ananya Sharma",
+    outcome: "INTERESTED · Meeting booked Thu 11:00 IST",
+    lines: [
+      [
+        "AGENT",
+        "नमस्ते Ananya जी, मैं Vyaperi X से बोल रही हूँ। आपने SharePoint migration partner के बारे में पोस्ट किया था — क्या अभी वह project active है?",
+      ],
+      [
+        "PROSPECT",
+        "हाँ, हम Q4 में शुरू करना चाहते हैं। Budget approved हो चुका है और legacy migration मुख्य scope है।",
+      ],
+      ["AGENT", "समझ गई। क्या Microsoft 365 integration और user training भी scope में शामिल है?"],
+      ["PROSPECT", "बिल्कुल, दोनों चाहिए।"],
+      [
+        "AGENT",
+        "बढ़िया — गुरुवार सुबह 11 बजे हमारे Senior Solution Architect के साथ एक scoping call schedule कर देती हूँ?",
+      ],
+      ["PROSPECT", "हाँ, चलेगा। ईमेल पर इनवाइट भेज दीजिए।"],
+    ],
+  },
+  gu: {
+    title: "Gujarati Voice Protocol — Bharat Patel (Patel Textiles)",
+    agent: "Dhruv",
+    lead: "Bharat Patel",
+    outcome: "INTERESTED · Live Demo Confirmed Wed 10:00 IST",
+    lines: [
+      [
+        "AGENT",
+        "નમસ્તે Bharat ભાઈ, હું Vyaperi X થી ધ્રુવ વાત કરું છું. આપના ગોડાઉન ઇન્વેન્ટરી અને GST બિલિંગ ઓટોમેશન અંગે વાત કરવી હતી — શું આપ 2 મિનિટ ફાળવી શકશો?",
+      ],
+      [
+        "PROSPECT",
+        "હા, ચોક્કસ. અમે હાલમાં 4 વેરહાઉસ માટે નવું Cloud ERP સિસ્ટમ શોધી રહ્યા છીએ.",
+      ],
+      [
+        "AGENT",
+        "સરસ! અમારું પ્લેટફોર્મ મલ્ટિ-વેરહાઉસ રિયલ-ટાઇમ સ્ટોક ટ્રેકિંગ અને ઇ-વે બિલ ઓટોમેશન સપોર્ટ કરે છે. શું આપ બુધવારે સવારે 10 વાગ્યે 15 મિનિટનો લાઇવ ડેમો જોવા માંગો છો?",
+      ],
+      ["PROSPECT", "હા, એ સમય અનુકૂળ રહેશે. મને વોટ્સએપ અને ઈમેલ પર મીટિંગ લિંક મોકલી આપો."],
+      [
+        "AGENT",
+        "ચોક્કસ Bharat ભાઈ, કેલેન્ડર ઇનવાઇટ અને ડેમો વિગતો આપના રજિસ્ટર્ડ ઇમેઇલ પર મોકલી દીધી છે. આભાર!",
+      ],
+    ],
+  },
+  en: {
+    title: "Global Enterprise Protocol — Daniel Wright (Orbit Retail)",
+    agent: "Arjun",
+    lead: "Daniel Wright",
+    outcome: "QUALIFIED · Discovery Briefing Fri 14:00 GMT",
+    lines: [
+      [
+        "AGENT",
+        "Hi Daniel, Arjun here from VyaperiX. I noticed Orbit Retail recently posted an RFP for enterprise headless commerce migration — is that initiative currently active for Q4?",
+      ],
+      [
+        "PROSPECT",
+        "Yes, hi Arjun. We've got executive sign-off and we're vetting architectures that can handle high holiday concurrency.",
+      ],
+      [
+        "AGENT",
+        "Makes sense. We specialize in zero-downtime microservices with autonomous failover. Would it make sense to connect with our Lead Enterprise Architect this Friday at 2 PM GMT?",
+      ],
+      ["PROSPECT", "That works well. Please send over the calendar invite and our procurement deck."],
+      [
+        "AGENT",
+        "Done. The invite and architectural whitepaper are in your inbox. Looking forward to speaking Friday, Daniel!",
+      ],
+    ],
+  },
+};
 
 const LIVE_DISCOVERY_FEED = [
   {
@@ -175,6 +255,10 @@ const STACK = [
 ];
 
 export function MainPlatformLanding() {
+  const { user, signOut } = useAuth();
+  const [activeLang, setActiveLang] = useState<"hi" | "gu" | "en">("hi");
+  const protocol = PROTOCOL_TRANSCRIPTS[activeLang] || PROTOCOL_TRANSCRIPTS["hi"]!;
+
   const [activeLeadTicker, setActiveLeadTicker] = useState(0);
 
   useEffect(() => {
@@ -196,8 +280,8 @@ export function MainPlatformLanding() {
 
       {/* ── /01 HERO SECTION WITH LIVE HUD RADAR ── */}
       <section className="border-b border-ink/20 overflow-hidden">
-        <div className="mx-auto grid max-w-[1400px] gap-10 px-4 py-12 lg:grid-cols-[1.05fr_1fr] lg:px-8 lg:py-20">
-          <div className="min-w-0 space-y-6">
+        <div className="mx-auto grid max-w-[1400px] gap-8 px-4 py-10 sm:py-12 lg:grid-cols-[1.05fr_1fr] lg:px-8 lg:py-20">
+          <div className="min-w-0 space-y-5 sm:space-y-6">
             <ScrollReveal variant="fade-down" delay={50}>
               <div className="flex items-center gap-2">
                 <span className="label-mono text-violet">/01 Platform</span>
@@ -209,7 +293,7 @@ export function MainPlatformLanding() {
             </ScrollReveal>
 
             <ScrollReveal variant="fade-up" delay={150}>
-              <h1 className="font-display text-[clamp(2.75rem,9vw,6.5rem)] font-extrabold leading-[0.85] tracking-tight text-ink">
+              <h1 className="font-display text-[clamp(2.4rem,9vw,6.5rem)] font-extrabold leading-[0.85] tracking-tight text-ink">
                 AI Sales
                 <br />
                 Engine
@@ -229,17 +313,38 @@ export function MainPlatformLanding() {
 
             {/* CTA Buttons */}
             <ScrollReveal variant="fade-up" delay={350}>
-              <div className="flex flex-wrap items-center gap-4">
-                <Link
-                  to="/login"
-                  className="group inline-flex items-center gap-3 border border-ink bg-ink px-6 py-4 label-mono text-paper transition-all hover:border-violet hover:bg-violet hover:text-white active:scale-95 shadow-md"
-                >
-                  Start Free Trial
-                  <ArrowUpRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
-                </Link>
+              <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-3">
+                {user ? (
+                  <>
+                    <Link
+                      to="/dashboard"
+                      className="group inline-flex items-center justify-center gap-3 border border-ink bg-lime text-black px-6 py-4 label-mono font-bold transition-all hover:bg-white hover:text-black active:scale-95 shadow-md text-sm"
+                    >
+                      <span className="w-2 h-2 rounded-full bg-black animate-pulse" />
+                      Open Command Console
+                      <ArrowUpRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={() => signOut()}
+                      className="inline-flex items-center justify-center gap-2 border border-ink/20 bg-card px-4 py-4 label-mono text-xs text-muted-foreground hover:text-destructive hover:border-destructive transition-all cursor-pointer"
+                    >
+                      Sign Out
+                    </button>
+                  </>
+                ) : (
+                  <Link
+                    to="/login"
+                    search={{ tab: "Signup" }}
+                    className="group inline-flex items-center justify-center gap-3 border border-ink bg-ink px-6 py-4 label-mono text-paper transition-all hover:border-violet hover:bg-violet hover:text-white active:scale-95 shadow-md text-sm"
+                  >
+                    Start Free Trial
+                    <ArrowUpRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+                  </Link>
+                )}
                 <a
                   href="#sandbox"
-                  className="inline-flex items-center gap-2 border border-ink/20 bg-card px-4 py-4 label-mono text-ink hover:border-violet hover:text-violet transition-all"
+                  className="inline-flex items-center justify-center gap-2 border border-ink/20 bg-card px-4 py-4 label-mono text-ink hover:border-violet hover:text-violet transition-all text-sm"
                 >
                   <Maximize2 className="h-3.5 w-3.5" /> Interactive Pipeline Sandbox
                 </a>
@@ -274,7 +379,7 @@ export function MainPlatformLanding() {
 
           {/* Right Hero: Mesh Image with Live Telemetry Overlay */}
           <ScrollReveal variant="fade-left" delay={200} className="h-full">
-            <div className="relative min-w-0 h-full border border-ink bg-card flex flex-col justify-between overflow-hidden shadow-2xl">
+            <div className="relative min-w-0 min-h-[220px] sm:min-h-[280px] lg:min-h-0 h-full border border-ink bg-card flex flex-col justify-between overflow-hidden shadow-2xl">
               {/* Top HUD bar */}
               <div className="absolute left-4 top-4 z-10 flex items-center gap-2 border border-ink bg-paper px-3 py-1.5 label-mono shadow">
                 <span className="h-1.5 w-1.5 bg-lime live-dot" />
@@ -295,7 +400,7 @@ export function MainPlatformLanding() {
 
       {/* ── /02 11-STEP AUTONOMOUS PIPELINE ── */}
       <section id="pipeline" className="border-b border-ink/20">
-        <div className="mx-auto max-w-[1400px] px-4 py-16 lg:px-8">
+        <div className="mx-auto max-w-[1400px] px-4 py-12 sm:py-16 lg:px-8">
           <ScrollReveal variant="fade-up">
             <SectionHead index="02" title="11-Step End-to-End Autonomous Pipeline Flow">
               <span className="label-mono text-muted-foreground">
@@ -312,7 +417,7 @@ export function MainPlatformLanding() {
 
       {/* ── /03 INTERACTIVE SANDBOX SIMULATOR ── */}
       <section id="sandbox" className="border-b border-ink/20">
-        <div className="mx-auto max-w-[1400px] px-4 py-16 lg:px-8">
+        <div className="mx-auto max-w-[1400px] px-4 py-12 sm:py-16 lg:px-8">
           <ScrollReveal variant="fade-up">
             <SectionHead index="03" title="Interactive Pipeline Sandbox">
               <span className="label-mono text-muted-foreground">
@@ -329,7 +434,7 @@ export function MainPlatformLanding() {
 
       {/* ── /04 BHARAT SIGNAL MAP — MULTILINGUAL REACH ── */}
       <section id="reach" className="border-b border-ink/20 bg-secondary/30 overflow-hidden">
-        <div className="mx-auto max-w-[1400px] px-4 py-16 lg:px-8">
+        <div className="mx-auto max-w-[1400px] px-4 py-12 sm:py-16 lg:px-8">
           <ScrollReveal variant="fade-up">
             <SectionHead index="04" title="One Agent. Every Language. Every City.">
               <span className="label-mono text-muted-foreground">Live Multilingual Reach</span>
@@ -348,7 +453,7 @@ export function MainPlatformLanding() {
 
       {/* ── /05 MULTILINGUAL VOICE PROTOCOL & LIVE SPEECH SYNTHESIS ── */}
       <section id="voice" className="border-b border-ink/20">
-        <div className="mx-auto max-w-[1400px] px-4 py-16 lg:px-8 space-y-10">
+        <div className="mx-auto max-w-[1400px] px-4 py-12 sm:py-16 lg:px-8 space-y-8 sm:space-y-10">
           <ScrollReveal variant="fade-up">
             <div>
               <SectionHead index="05" title="Multilingual Voice Agent Testing Studio">
@@ -371,6 +476,102 @@ export function MainPlatformLanding() {
             <VoiceAgentSynthesizerWidget />
           </ScrollReveal>
 
+          {/* Protocol Dialogue Inspector */}
+          <div className="grid gap-8 lg:grid-cols-[1fr_1.1fr] pt-4">
+            <ScrollReveal variant="fade-right" delay={200}>
+              <div>
+                <div className="label-mono text-xs text-violet font-bold">
+                  // Autonomous Conversation Turn-Taking:
+                </div>
+                <p className="mt-3 font-mono text-xs leading-relaxed text-muted-foreground">
+                  Every outbound call is culturally attuned and consultative. The AI voice agent
+                  introduces itself, qualifies against your ICP parameters, addresses pricing &
+                  timeline objections, and books meetings directly into your CRM.
+                </p>
+
+                <div className="mt-5 flex gap-2">
+                  <button
+                    onClick={() => setActiveLang("hi")}
+                    className={`px-3 py-1.5 font-mono text-xs border transition-colors ${
+                      activeLang === "hi"
+                        ? "bg-violet text-white border-violet font-bold"
+                        : "border-ink/20 hover:bg-secondary text-ink"
+                    }`}
+                  >
+                    Hindi (हिन्दी)
+                  </button>
+                  <button
+                    onClick={() => setActiveLang("gu")}
+                    className={`px-3 py-1.5 font-mono text-xs border transition-colors ${
+                      activeLang === "gu"
+                        ? "bg-violet text-white border-violet font-bold"
+                        : "border-ink/20 hover:bg-secondary text-ink"
+                    }`}
+                  >
+                    Gujarati (ગુજરાતી)
+                  </button>
+                  <button
+                    onClick={() => setActiveLang("en")}
+                    className={`px-3 py-1.5 font-mono text-xs border transition-colors ${
+                      activeLang === "en"
+                        ? "bg-violet text-white border-violet font-bold"
+                        : "border-ink/20 hover:bg-secondary text-ink"
+                    }`}
+                  >
+                    English (UK/Global)
+                  </button>
+                </div>
+
+                <ul className="mt-6 space-y-2.5">
+                  {[
+                    "Sub-150ms speech-to-speech conversational turnaround",
+                    "Dialect-aware pronunciation across Indian & global regional accents",
+                    "Real-time objection detection & dynamic playbook adaptation",
+                    "Instant CRM meeting confirmation with audio recording & transcript",
+                  ].map((li) => (
+                    <li key={li} className="flex gap-2.5 font-mono text-xs text-ink">
+                      <span className="text-emerald-700 dark:text-lime font-bold">✓</span>
+                      {li}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </ScrollReveal>
+
+            <ScrollReveal variant="fade-left" delay={250}>
+              <div className="border border-ink bg-card p-6 text-ink shadow-lg space-y-4 rounded-none">
+                <div className="flex items-center justify-between border-b border-border pb-3">
+                  <span className="label-mono text-xs text-muted-foreground flex items-center gap-2">
+                    <Volume2 className="h-4 w-4 text-violet" />
+                    {protocol.title}
+                  </span>
+                  <Tag tone="lime">Agent: {protocol.agent}</Tag>
+                </div>
+
+                <div className="space-y-3 font-mono text-xs max-h-64 overflow-y-auto pr-1">
+                  {protocol.lines.map(([role, text], idx) => (
+                    <div
+                      key={idx}
+                      className={`p-3 rounded border leading-relaxed ${
+                        role === "AGENT"
+                          ? "bg-violet/10 border-violet/30 text-ink ml-4"
+                          : "bg-secondary border-border mr-4"
+                      }`}
+                    >
+                      <div className="font-bold text-[10px] mb-1 text-muted-foreground">
+                        [{role === "AGENT" ? `AI AGENT — ${protocol.agent}` : protocol.lead}]
+                      </div>
+                      <div>{text}</div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-2 border border-ink bg-lime px-3 py-2 label-mono text-lime-foreground text-center font-bold">
+                  {protocol.outcome}
+                </div>
+              </div>
+            </ScrollReveal>
+          </div>
         </div>
       </section>
 
@@ -416,13 +617,24 @@ export function MainPlatformLanding() {
               Configure your workspace, set target ICP parameters, and deploy your first
               multilingual voice fleet in minutes.
             </p>
-            <Link
-              to="/login"
-              className="group inline-flex items-center gap-3 border border-ink bg-ink px-6 py-4 label-mono text-paper transition-all hover:border-violet hover:bg-violet hover:text-white active:scale-95 shadow-lg"
-            >
-              Access Sales Console
-              <ArrowUpRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
-            </Link>
+            {user ? (
+              <Link
+                to="/dashboard"
+                className="group inline-flex items-center gap-3 border border-ink bg-lime text-black px-6 py-4 label-mono font-bold transition-all hover:bg-white hover:text-black active:scale-95 shadow-lg"
+              >
+                Access Command Console
+                <ArrowUpRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+              </Link>
+            ) : (
+              <Link
+                to="/login"
+                search={{ tab: "Signup" }}
+                className="group inline-flex items-center gap-3 border border-ink bg-ink px-6 py-4 label-mono text-paper transition-all hover:border-violet hover:bg-violet hover:text-white active:scale-95 shadow-lg"
+              >
+                Start Free Trial →
+                <ArrowUpRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+              </Link>
+            )}
           </ScrollReveal>
 
           <ScrollReveal variant="fade-left" delay={150} className="bg-paper p-8 lg:p-14">

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/lib/auth";
+import { getApiBase, getAuthHeaders as getApiAuthHeaders } from "@/lib/api";
 import {
   Sparkles,
   PhoneCall,
@@ -35,6 +36,7 @@ import {
   ChevronRight,
   ShieldCheck,
   Delete,
+  Ban,
 } from "lucide-react";
 
 interface VoiceFleetModuleProps {
@@ -92,7 +94,7 @@ interface ParsedContact {
   status?: "pending" | "calling" | "completed" | "failed";
 }
 
-const API_BASE = (import.meta.env["VITE_SCRAPER_API_BASE"] as string) || "http://localhost:8000";
+const API_BASE = getApiBase();
 
 export function VoiceFleetModule({
   analysis,
@@ -115,11 +117,7 @@ export function VoiceFleetModule({
     : undefined;
 
   const getAuthHeaders = () => {
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (session?.access_token) {
-      headers["Authorization"] = `Bearer ${session.access_token}`;
-    }
-    return headers;
+    return getApiAuthHeaders(session?.access_token);
   };
 
   // Tab State: "logs" | "csv" | "live" | "inbound" | "settings"
@@ -294,6 +292,10 @@ export function VoiceFleetModule({
     public_webhook_url: "",
     voice_provider: "sarvam",
     voice_id: "priya",
+    sms_alerts_enabled: true,
+    alert_phone_number: "",
+    calendly_api_token: "",
+    calendly_event_url: "",
   });
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsSavedMessage, setSettingsSavedMessage] = useState(false);
@@ -390,7 +392,7 @@ export function VoiceFleetModule({
 
       if (callsRes.ok) {
         const callsData = await callsRes.json();
-        setCalls(callsData);
+        setCalls(Array.isArray(callsData) ? callsData : []);
       }
       if (statsRes.ok) {
         const statsData = await statsRes.json();
@@ -466,6 +468,10 @@ export function VoiceFleetModule({
           public_webhook_url: data.public_webhook_url || "",
           voice_provider: data.voice_provider || "sarvam",
           voice_id: data.voice_id || "priya",
+          sms_alerts_enabled: data.sms_alerts_enabled !== undefined ? Boolean(data.sms_alerts_enabled) : true,
+          alert_phone_number: data.alert_phone_number || "",
+          calendly_api_token: data.calendly_token_masked || "",
+          calendly_event_url: data.calendly_event_url || "",
         }));
       }
     } catch (err) {
@@ -2456,6 +2462,114 @@ export function VoiceFleetModule({
                 </div>
               </div>
             )}
+
+            {/* SMS Meeting Alerts Configuration */}
+            <div className="border border-ink/20 bg-secondary/10 p-4 space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <label htmlFor="voiceSmsAlerts" className="text-ink font-bold text-xs cursor-pointer flex items-center gap-1.5">
+                    <MessageSquare className="w-3.5 h-3.5 text-lime-700 dark:text-lime" /> Enable SMS Meeting Alerts
+                  </label>
+                  <p className="text-muted-foreground text-[11px] font-mono">
+                    Receive instant SMS notifications whenever a new meeting is scheduled or extracted from an AI call.
+                  </p>
+                </div>
+                <input
+                  type="checkbox"
+                  id="voiceSmsAlerts"
+                  checked={settings.sms_alerts_enabled}
+                  onChange={(e) => setSettings({ ...settings, sms_alerts_enabled: e.target.checked })}
+                  className="cursor-pointer accent-violet w-4 h-4"
+                />
+              </div>
+
+              <div className="space-y-1.5 pt-2 border-t border-ink/10 font-mono text-xs">
+                <label className="label-mono text-muted-foreground flex items-center gap-1.5">
+                  Alert Phone Number (fallback)
+                </label>
+                <input
+                  type="text"
+                  placeholder="+919876543210"
+                  value={settings.alert_phone_number}
+                  onChange={(e) => setSettings({ ...settings, alert_phone_number: e.target.value })}
+                  className="w-full border border-ink/30 bg-paper px-3 py-2 text-ink focus:outline-none focus:border-violet"
+                />
+                <span className="text-[10px] text-muted-foreground block font-mono">
+                  Fallback phone number to receive SMS alerts if user profile phone is not set.
+                </span>
+              </div>
+            </div>
+
+            {/* Calendly Integration Section */}
+            <div className="space-y-3 border border-emerald-500/30 bg-emerald-500/5 dark:bg-emerald-950/20 p-4">
+              <div className="flex items-center gap-2 mb-1">
+                <div className="w-2 h-2 bg-emerald-500 rounded-full" />
+                <span className="label-mono text-[10px] text-emerald-700 dark:text-emerald-400 uppercase font-bold tracking-wider">
+                  Calendly Integration — Self-Booking Links for Leads
+                </span>
+              </div>
+              <div className="space-y-1.5 font-mono text-xs">
+                <label className="label-mono text-muted-foreground">Calendly Personal Access Token</label>
+                <input
+                  type="password"
+                  placeholder="eyJ... (paste your Calendly PAT)"
+                  value={settings.calendly_api_token}
+                  onChange={(e) => setSettings({ ...settings, calendly_api_token: e.target.value })}
+                  className="w-full border border-ink/30 bg-paper px-3 py-2 text-ink focus:outline-none focus:border-emerald-500 font-mono text-xs"
+                />
+                <span className="text-[10px] text-muted-foreground block">
+                  Your Calendly API token. Used to fetch your event type scheduling links automatically.
+                </span>
+              </div>
+              <div className="space-y-1.5 font-mono text-xs">
+                <label className="label-mono text-muted-foreground">Calendly Booking URL (override or specific link)</label>
+                <input
+                  type="url"
+                  placeholder="https://calendly.com/yourname/30min"
+                  value={settings.calendly_event_url}
+                  onChange={(e) => setSettings({ ...settings, calendly_event_url: e.target.value })}
+                  className="w-full border border-ink/30 bg-paper px-3 py-2 text-ink focus:outline-none focus:border-emerald-500 font-mono text-xs"
+                />
+                <span className="text-[10px] text-muted-foreground block">
+                  If set, this link is sent to leads via WhatsApp & SMS when a booking is confirmed. Overrides auto-fetch.
+                </span>
+              </div>
+            </div>
+
+            {/* Hate Speech & Abuse Guardrail Section */}
+            <div className="space-y-3 border border-red-500/30 bg-red-500/5 dark:bg-red-950/20 p-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse" />
+                  <div>
+                    <span className="label-mono text-[10px] text-red-700 dark:text-red-400 uppercase font-bold tracking-wider block">
+                      Trust & Safety — Multi-Lingual Speech Guardrail & Blacklist
+                    </span>
+                    <span className="text-[11px] text-muted-foreground font-mono">
+                      Real-time protection against hate speech, insults, and harassment across 10+ Indic languages.
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (typeof window !== "undefined") {
+                      try {
+                        localStorage.setItem("vyaperi_active_nav", "guardrail");
+                        const url = new URL(window.location.href);
+                        url.searchParams.set("tab", "guardrail");
+                        window.history.replaceState(null, "", url.toString());
+                        window.location.reload();
+                      } catch {}
+                    }
+                  }}
+                  className="px-3.5 py-1.5 bg-red-600 hover:bg-red-500 text-white font-mono text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5 shrink-0"
+                >
+                  <Ban className="w-3.5 h-3.5" />
+                  Manage Blocked Numbers (PIN: 8899)
+                </button>
+              </div>
+            </div>
 
             <div className="pt-2 flex items-center justify-between">
               <button

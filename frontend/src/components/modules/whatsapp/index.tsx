@@ -17,6 +17,8 @@ import {
   Clock,
   Zap,
 } from "lucide-react";
+import { useAuth } from "@/lib/auth";
+import { getApiBase, getAuthHeaders } from "@/lib/api";
 
 interface WhatsAppModuleProps {
   companyName?: string;
@@ -30,9 +32,8 @@ interface GatewayStatus {
   qr_url: string | null;
 }
 
-const API_BASE = (((import.meta.env as Record<string, any>)["VITE_SCRAPER_API_BASE"]) || "http://localhost:8000").replace(/\/$/, "");
-
 export function WhatsAppModule({ companyName = "VyaperiX" }: WhatsAppModuleProps) {
+  const { session } = useAuth();
   const [statusData, setStatusData] = useState<GatewayStatus | null>(null);
   const [qrBase64, setQrBase64] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -56,7 +57,9 @@ export function WhatsAppModule({ companyName = "VyaperiX" }: WhatsAppModuleProps
   const fetchStatus = async () => {
     try {
       setLoading(true);
-      const res = await fetch(`${API_BASE}/api/whatsapp/status`);
+      const res = await fetch(`${getApiBase()}/api/whatsapp/status`, {
+        headers: getAuthHeaders(session?.access_token),
+      });
       if (res.ok) {
         const data = await res.json();
         setStatusData(data);
@@ -76,7 +79,9 @@ export function WhatsAppModule({ companyName = "VyaperiX" }: WhatsAppModuleProps
   // Fetch QR Code data URL
   const fetchQR = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/whatsapp/qr`);
+      const res = await fetch(`${getApiBase()}/api/whatsapp/qr`, {
+        headers: getAuthHeaders(session?.access_token),
+      });
       if (res.ok) {
         const data = await res.json();
         if (data.qr_data_url) {
@@ -93,7 +98,10 @@ export function WhatsAppModule({ companyName = "VyaperiX" }: WhatsAppModuleProps
     if (!window.confirm("Are you sure you want to disconnect this WhatsApp number? You will need to scan QR code again.")) return;
     try {
       setLoading(true);
-      const res = await fetch(`${API_BASE}/api/whatsapp/logout`, { method: "POST" });
+      const res = await fetch(`${getApiBase()}/api/whatsapp/logout`, {
+        method: "POST",
+        headers: getAuthHeaders(session?.access_token),
+      });
       if (res.ok) {
         setTimeout(fetchStatus, 1500);
       }
@@ -111,11 +119,11 @@ export function WhatsAppModule({ companyName = "VyaperiX" }: WhatsAppModuleProps
     setSendResult(null);
 
     try {
-      let endpoint = `${API_BASE}/api/whatsapp/send`;
+      let endpoint = `${getApiBase()}/api/whatsapp/send`;
       let payload: any = { phone: targetPhone };
 
       if (msgType === "meeting") {
-        endpoint = `${API_BASE}/api/whatsapp/send-meeting`;
+        endpoint = `${getApiBase()}/api/whatsapp/send-meeting`;
         payload = {
           customer_name: customerName,
           customer_phone: targetPhone,
@@ -126,7 +134,7 @@ export function WhatsAppModule({ companyName = "VyaperiX" }: WhatsAppModuleProps
           requirements: requirements,
         };
       } else if (msgType === "requirements") {
-        endpoint = `${API_BASE}/api/whatsapp/send-summary`;
+        endpoint = `${getApiBase()}/api/whatsapp/send-summary`;
         payload = {
           customer_name: customerName,
           customer_phone: targetPhone,
@@ -143,7 +151,7 @@ export function WhatsAppModule({ companyName = "VyaperiX" }: WhatsAppModuleProps
 
       const res = await fetch(endpoint, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAuthHeaders(session?.access_token, { "Content-Type": "application/json" }),
         body: JSON.stringify(payload),
       });
 

@@ -393,6 +393,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     localStorage.removeItem("vyepari_x_auth_token");
     localStorage.removeItem("vyepari_x_auth_provider");
     localStorage.removeItem("vyepari_x_google_user");
+    // Clear session-scoped caches so a different user doesn't see stale data
+    try {
+      sessionStorage.clear();
+    } catch {}
   };
 
   return (

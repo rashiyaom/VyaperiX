@@ -161,7 +161,7 @@ async def send_meeting_confirmation(
     requirements: Optional[str] = None,
 ) -> dict:
     """
-    Builds and sends a meeting confirmation message with Google Meet link.
+    Builds and sends a meeting confirmation message with live video room link & call requirements.
     """
     c_name = (customer_name or "there").strip()
     b_name = (business_name or "our team").strip()
@@ -170,23 +170,27 @@ async def send_meeting_confirmation(
     lines = [
         f"नमस्ते / Hello {c_name}! 🎉",
         "",
-        f"Thank you for speaking with us today! As agreed on our call, your product demo & discovery session with *{b_name}* is confirmed.",
+        f"Thank you for speaking with our team today! As discussed, your product demonstration & briefing session with *{b_name}* is officially confirmed.",
         "",
         f"📅 *Date & Time:* {formatted_time}",
-        f"🔗 *Google Meet Link:* {meet_url}",
+        f"🎥 *Live Video Meeting Room:*",
+        f"{meet_url}",
+        "_(Click link above to join from your mobile phone or PC. No app download or account required!)_",
     ]
 
     if agenda:
         clean_agenda = agenda.strip()
-        lines.append(f"📋 *Discussion Agenda:*\n{clean_agenda}")
+        lines.extend(["", f"📋 *Discussion Agenda & Topics:*\n{clean_agenda}"])
 
     if requirements:
         clean_req = requirements.strip()
-        lines.append(f"\n📌 *Your Requirements Noted:*\n_{clean_req}_")
+        lines.extend(["", f"📌 *Key Requirements Noted from Call:*\n_{clean_req}_"])
 
     lines.extend([
         "",
-        "Looking forward to connecting! If you need to reschedule or have questions before the meeting, simply reply to this message anytime.",
+        "💡 *Session Tips:* Please join 2 minutes early with your camera and microphone enabled for the live walkthrough.",
+        "",
+        "Looking forward to connecting! If you need to reschedule or have questions before the session, simply reply to this WhatsApp message.",
         f"— Team *{b_name}*",
     ])
 
@@ -237,6 +241,68 @@ async def send_requirements_summary(
         "Have any additional questions, or would you like to schedule a live demo? Reply directly to this WhatsApp message anytime!",
         f"— Team *{b_name}*",
     ]
+
+    full_message = "\n".join(lines)
+    return await send_whatsapp_message(phone=customer_phone, text=full_message)
+
+
+async def send_meeting_confirmation_with_calendly(
+    customer_name: str,
+    customer_phone: str,
+    business_name: str,
+    start_time: str,
+    meet_url: str,
+    calendly_link: Optional[str] = None,
+    agenda: Optional[str] = None,
+    requirements: Optional[str] = None,
+) -> dict:
+    """
+    Sends a meeting confirmation. If a Calendly link is provided, it is featured
+    prominently so the customer can self-pick their preferred time slot.
+    Falls back to Jitsi / video room link when no Calendly link is configured.
+    """
+    c_name = (customer_name or "there").strip()
+    b_name = (business_name or "our team").strip()
+    formatted_time = format_meeting_time(start_time)
+
+    lines = [
+        f"नमस्ते / Hello {c_name}! 🎉",
+        "",
+        f"Thank you for speaking with *{b_name}* today! Our team has reviewed your request and confirmed your meeting.",
+        "",
+    ]
+
+    if calendly_link:
+        lines += [
+            "📅 *Book Your Preferred Time Slot:*",
+            f"{calendly_link}",
+            "_(Tap the link above to pick a time that works best for you — no app required!)_",
+            "",
+            f"📌 *Proposed Slot:* {formatted_time}",
+        ]
+    else:
+        lines += [
+            f"📅 *Date & Time:* {formatted_time}",
+            "🎥 *Live Video Meeting Room:*",
+            f"{meet_url}",
+            "_(Click link above to join from mobile or PC. No app download required!)_",
+        ]
+
+    if agenda:
+        clean_agenda = agenda.strip()
+        lines.extend(["", f"📋 *Discussion Agenda:*\n{clean_agenda}"])
+
+    if requirements:
+        clean_req = requirements.strip()
+        lines.extend(["", f"📌 *Key Requirements from Call:*\n_{clean_req}_"])
+
+    lines.extend([
+        "",
+        "💡 *Tip:* Join 2 minutes early with your camera and mic enabled.",
+        "",
+        "Reply to this WhatsApp message anytime if you have questions.",
+        f"— Team *{b_name}*",
+    ])
 
     full_message = "\n".join(lines)
     return await send_whatsapp_message(phone=customer_phone, text=full_message)

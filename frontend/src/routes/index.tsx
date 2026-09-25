@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { CinematicFrameHero } from "@/components/site/CinematicFrameHero";
 import { MainPlatformLanding } from "@/components/site/MainPlatformLanding";
@@ -17,8 +18,15 @@ export const Route = createFileRoute("/")({
 });
 
 function Index() {
+  useEffect(() => {
+    // Ensure clean open on fullscreen hero when visiting landing page without an anchor hash
+    if (typeof window !== "undefined" && !window.location.hash) {
+      window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+    }
+  }, []);
+
   return (
-    <div className="relative w-full overflow-x-hidden bg-paper text-ink selection:bg-lime selection:text-neutral-950">
+    <div className="relative w-full bg-paper text-ink selection:bg-lime selection:text-neutral-950">
       {/* 🎬 1. Pure Fullscreen Video Hero with Instant Frame-Synchronized Light/Dark Toggle */}
       <CinematicFrameHero />
 

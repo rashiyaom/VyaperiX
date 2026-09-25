@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
+import { getApiBase, getAuthHeaders } from "@/lib/api";
 import {
   Calendar as CalendarIcon,
   Clock,
@@ -39,17 +40,41 @@ export interface CalendarEventRecord {
   company_name?: string;
   title: string;
   description?: string;
+  agenda?: string;
+  notes?: string;
+  transcript?: any;
   start_time: string;
   end_time: string;
-  meeting_type: "google_meet" | "phone_call" | "in_person";
+  meeting_type: "live_video" | "google_meet" | "phone_call" | "in_person";
   meet_url?: string;
-  status: "scheduled" | "completed" | "cancelled";
+  status: "new_booking" | "scheduled" | "confirmed" | "completed" | "cancelled";
+  has_conflict?: boolean;
+  conflict_details?: any;
+  suggested_alternate_start?: string;
+  suggested_alternate_end?: string;
+  whatsapp_status?: string;
+  whatsapp_sent_at?: string;
+  email_status?: string;
+  email_sent_at?: string;
   reminder_minutes: number;
   remind_via: string;
   google_event_id?: string;
   synced_to_google: boolean;
   created_at: string;
   updated_at: string;
+  // Calendly Integration
+  calendly_link?: string;
+  calendly_link_sent_at?: string;
+  calendly_booked?: boolean;
+  calendly_booking_at?: string;
+  calendly_invitee_name?: string;
+  calendly_invitee_email?: string;
+  calendly_event_uri?: string;
+  calendly_cancel_url?: string;
+  calendly_reschedule_url?: string;
+  calendly_canceled_at?: string;
+  approved_at?: string;
+  approved_by?: string;
 }
 
 export interface CalendarModuleProps {
@@ -58,7 +83,7 @@ export interface CalendarModuleProps {
   companyName?: string;
 }
 
-const API_BASE = (((import.meta.env as Record<string, any>)["VITE_BACKEND_URL"]) || "http://localhost:8000").replace(/\/$/, "");
+const API_BASE = getApiBase();
 
 const DAYS_OF_WEEK = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTH_NAMES = [
@@ -92,20 +117,19 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
   const [formDuration, setFormDuration] = useState(30);
   const [formType, setFormType] = useState<"google_meet" | "phone_call">("google_meet");
   const [formReminder, setFormReminder] = useState(15);
+  const [formSendConfirmation, setFormSendConfirmation] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
   // Fetch events
   const fetchEvents = async () => {
     try {
       setLoading(true);
-      const headers: Record<string, string> = {};
-      if (session?.access_token) {
-        headers["Authorization"] = `Bearer ${session.access_token}`;
-      }
-      const res = await fetch(`${API_BASE}/api/calendar/events?limit=200`, { headers });
+      const headers = getAuthHeaders(session?.access_token);
+      const userParam = user?.id ? `&user_id=${encodeURIComponent(user.id)}` : "";
+      const res = await fetch(`${API_BASE}/api/calendar/events?limit=200${userParam}`, { headers });
       if (res.ok) {
         const data = await res.json();
-        setEvents(data.events || []);
+        setEvents(Array.isArray(data.events) ? data.events : []);
       }
     } catch (e) {
       console.error("Failed to load calendar events:", e);
@@ -116,7 +140,7 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
 
   useEffect(() => {
     fetchEvents();
-  }, [user]);
+  }, [user?.id]);
 
   // Temporary success banner
   const triggerSuccess = (msg: string) => {
@@ -127,6 +151,8 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
   // WhatsApp Dispatch Handler
   const [waSending, setWaSending] = useState(false);
   const [waResult, setWaResult] = useState<string | null>(null);
+  const [approvingId, setApprovingId] = useState<string | null>(null);
+  const [viewTranscriptEvent, setViewTranscriptEvent] = useState<CalendarEventRecord | null>(null);
 
   const handleSendWhatsApp = async (eventId: string, phone?: string) => {
     try {
@@ -146,6 +172,67 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
       setWaResult(e.message || "Error contacting server");
     } finally {
       setWaSending(false);
+    }
+  };
+
+  const handleApproveAndSendWhatsApp = async (
+    eventId: string,
+    customStartTime?: string,
+    customEndTime?: string
+  ) => {
+    try {
+      setApprovingId(eventId);
+      const res = await fetch(`${API_BASE}/api/calendar/events/${eventId}/approve-and-send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          start_time: customStartTime,
+          end_time: customEndTime,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        const calendlyMsg = data.calendly_link
+          ? ` Calendly booking link sent to customer.`
+          : ` Meeting link dispatched.`;
+        triggerSuccess(`✓ Booking confirmed & notifications dispatched to ${data.event?.customer_phone || "customer"}.${calendlyMsg}`);
+        await fetchEvents();
+        if (selectedEvent?.id === eventId) {
+          setSelectedEvent(data.event || null);
+        }
+      } else {
+        alert(`Approval notice: ${data.detail || data.error || "Failed to dispatch WhatsApp message. Ensure gateway is connected."}`);
+      }
+    } catch (e: any) {
+      alert(`Error approving booking: ${e.message}`);
+    } finally {
+      setApprovingId(null);
+    }
+  };
+
+  // Meeting Confirmation Email Dispatch Handler
+  const [emailSending, setEmailSending] = useState(false);
+
+  const handleSendMeetingEmail = async (eventId: string, customerEmail?: string) => {
+    try {
+      setEmailSending(true);
+      const headers: Record<string, string> = {};
+      if (session?.access_token) {
+        headers["Authorization"] = `Bearer ${session.access_token}`;
+      }
+      const url = `${API_BASE}/api/calendar/events/${eventId}/send-email${customerEmail ? `?recipient_email=${encodeURIComponent(customerEmail)}` : ""}`;
+      const res = await fetch(url, { method: "POST", headers });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        triggerSuccess(`✓ Meeting invitation email dispatched to ${data.rep_email || data.customer_email || "registered email"}!`);
+        fetchEvents();
+      } else {
+        alert(data.detail || data.error || "Failed to dispatch meeting email. Check SMTP settings or mock mode.");
+      }
+    } catch (e: any) {
+      alert(`Error sending email: ${e.message}`);
+    } finally {
+      setEmailSending(false);
     }
   };
 
@@ -209,6 +296,7 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
         customer_email: formCustomerEmail.trim() || undefined,
         customer_phone: formCustomerPhone.trim() || undefined,
         company_name: companyName || undefined,
+        user_id: user?.id || undefined,
         title: formTitle.trim(),
         description: formDescription.trim(),
         start_time: startDateTime.toISOString(),
@@ -216,11 +304,12 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
         meeting_type: formType,
         reminder_minutes: Number(formReminder),
         remind_via: "popup",
+        send_customer_confirmation: formSendConfirmation,
       };
 
       const res = await fetch(`${API_BASE}/api/calendar/events`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAuthHeaders(session?.access_token),
         body: JSON.stringify(payload),
       });
 
@@ -231,7 +320,11 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
         }
         setShowCreateModal(false);
         resetForm();
-        triggerSuccess("✓ Meeting scheduled with Google Meet & Reminders set!");
+        triggerSuccess(
+          formSendConfirmation
+            ? "✓ Meeting scheduled! Invitation email & live meeting link sent to registered email & client."
+            : "✓ Meeting scheduled with Google Meet & Reminders set!"
+        );
       }
     } catch (err) {
       console.error("Failed to create event:", err);
@@ -249,6 +342,7 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
     setFormDuration(30);
     setFormType("google_meet");
     setFormReminder(15);
+    setFormSendConfirmation(true);
   };
 
   // Filtered Events
@@ -380,6 +474,11 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
            d.getFullYear() === today.getFullYear();
   };
 
+  // AI Call Bookings awaiting sales agent confirmation (Tick workflow)
+  const newBookings = useMemo(() => {
+    return events.filter((e) => e.status === "new_booking");
+  }, [events]);
+
   return (
     <div className="space-y-6">
       {/* Top Banner / Actions Notification */}
@@ -392,6 +491,135 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
           <button onClick={() => setActionSuccessMsg(null)} className="text-muted-foreground hover:text-ink">
             <X className="w-3.5 h-3.5" />
           </button>
+        </div>
+      )}
+
+      {/* ─────────────────── NEW BOOKINGS AWAITING CONFIRMATION QUEUE ─────────────────── */}
+      {newBookings.length > 0 && (
+        <div className="border-2 border-amber-500 bg-amber-500/5 dark:bg-amber-950/20 p-4 sm:p-5 transition-all">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3.5 pb-2.5 border-b border-amber-500/20">
+            <div className="flex items-center gap-2.5">
+              <span className="flex h-2.5 w-2.5 rounded-full bg-amber-500 animate-pulse" />
+              <h3 className="font-display text-sm font-black uppercase tracking-wider text-amber-900 dark:text-amber-300 flex items-center gap-2">
+                ⚡ New Bookings Awaiting Agent Confirmation ({newBookings.length})
+              </h3>
+            </div>
+            <span className="text-[11px] font-mono text-muted-foreground">
+              Review slot availability & transcript, then tick to confirm and send live video link via WhatsApp.
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+            {newBookings.map((ev) => (
+              <div
+                key={ev.id}
+                className="border border-ink/30 bg-card p-4 flex flex-col justify-between gap-3 shadow-sm hover:border-ink transition-all"
+              >
+                <div className="space-y-2.5">
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="font-display text-xs font-bold uppercase text-ink line-clamp-1">
+                      {ev.title}
+                    </span>
+                    {ev.has_conflict ? (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-mono font-bold bg-destructive/15 text-destructive border border-destructive/30 shrink-0">
+                        <AlertCircle className="w-3 h-3" /> Conflict Detected
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-mono font-bold bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 shrink-0">
+                        <Check className="w-3 h-3" /> Slot Available
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="text-xs font-mono text-muted-foreground space-y-1">
+                    <div className="flex items-center gap-1.5 text-ink font-semibold">
+                      <User className="w-3.5 h-3.5 text-muted-foreground" />
+                      <span>{ev.customer_name}</span>
+                      {ev.customer_phone && <span className="text-muted-foreground font-normal">({ev.customer_phone})</span>}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <Clock className="w-3.5 h-3.5 text-muted-foreground" />
+                      <span>
+                        {new Date(ev.start_time).toLocaleDateString([], { month: "short", day: "numeric" })} • {formatTimeRange(ev.start_time, ev.end_time)}
+                      </span>
+                    </div>
+                    {ev.has_conflict && ev.suggested_alternate_start && (
+                      <div className="text-[11px] text-amber-700 dark:text-amber-400 bg-amber-500/10 p-2 border border-amber-500/20 font-mono space-y-1">
+                        <div>⚠️ Overlaps with prior booking.</div>
+                        <div className="flex items-center justify-between gap-1">
+                          <span>Next free: {new Date(ev.suggested_alternate_start).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleApproveAndSendWhatsApp(ev.id, ev.suggested_alternate_start, ev.suggested_alternate_end)}
+                            className="underline font-bold hover:text-ink"
+                          >
+                            Use Slot
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {ev.meet_url && (
+                    <div className="pt-1">
+                      <a
+                        href={ev.meet_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 text-[11px] font-mono text-violet hover:underline truncate max-w-full"
+                      >
+                        <Video className="w-3.5 h-3.5 shrink-0" />
+                        <span className="truncate">Video: {ev.meet_url.split("/").pop()}</span>
+                        <ExternalLink className="w-2.5 h-2.5 shrink-0" />
+                      </a>
+                    </div>
+                  )}
+
+                  {ev.calendly_link && (
+                    <div className="pt-0.5">
+                      <a
+                        href={ev.calendly_link}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 text-[11px] font-mono text-emerald-700 dark:text-emerald-400 hover:underline truncate max-w-full"
+                      >
+                        <Link2 className="w-3.5 h-3.5 shrink-0" />
+                        <span className="truncate">
+                          {ev.calendly_booked ? "✓ Booked via Calendly" : "Calendly booking link sent"}
+                        </span>
+                        <ExternalLink className="w-2.5 h-2.5 shrink-0" />
+                      </a>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2 pt-2 border-t border-ink/10">
+                  <button
+                    type="button"
+                    onClick={() => setViewTranscriptEvent(ev)}
+                    className="flex-1 py-1.5 px-2 text-[11px] font-mono font-bold border border-ink/30 hover:bg-secondary text-ink flex items-center justify-center gap-1"
+                    title="View Call Transcript & Notes"
+                  >
+                    <MessageSquare className="w-3 h-3" /> Notes
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleApproveAndSendWhatsApp(ev.id)}
+                    disabled={approvingId === ev.id}
+                    className="flex-1 py-1.5 px-2 text-[11px] font-mono font-bold bg-emerald-600 hover:bg-emerald-700 text-white flex items-center justify-center gap-1.5 shadow-sm transition-all"
+                    title="Confirm meeting and dispatch WhatsApp invite"
+                  >
+                    {approvingId === ev.id ? (
+                      <RefreshCw className="w-3 h-3 animate-spin" />
+                    ) : (
+                      <Check className="w-3.5 h-3.5" />
+                    )}
+                    <span>Confirm & Send</span>
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -1023,7 +1251,9 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
             {selectedEvent.meet_url && (
               <div className="border border-violet/40 bg-violet/10 p-3 flex items-center justify-between">
                 <div className="truncate pr-2">
-                  <span className="label-mono text-[9px] text-violet block uppercase">Google Meet Room</span>
+                  <span className="label-mono text-[9px] text-violet block uppercase font-bold">
+                    {selectedEvent.meet_url.includes("jit.si") ? "🎥 Live Video Room (Jitsi Meet)" : "Video Meeting Room"}
+                  </span>
                   <span className="font-mono text-xs text-ink truncate block font-bold">
                     {selectedEvent.meet_url}
                   </span>
@@ -1035,14 +1265,77 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
                   className="flex items-center gap-1 bg-violet text-white px-3 py-1.5 label-mono text-xs font-bold hover:bg-violet/90 shrink-0"
                 >
                   <ExternalLink className="w-3 h-3" />
-                  <span>Join</span>
+                  <span>Join Room</span>
                 </a>
+              </div>
+            )}
+
+            {/* Calendly Booking Link */}
+            {selectedEvent.calendly_link && (
+              <div className="border border-emerald-500/40 bg-emerald-500/5 dark:bg-emerald-950/20 p-3">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="label-mono text-[9px] text-emerald-700 dark:text-emerald-400 uppercase font-bold flex items-center gap-1">
+                    <Link2 className="w-3 h-3" />
+                    Calendly Booking Link (Sent to Customer)
+                  </span>
+                  {selectedEvent.calendly_booked ? (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30">
+                      <CheckCircle2 className="w-3 h-3" /> Booked via Calendly
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-mono font-bold bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30">
+                      <Clock className="w-3 h-3" /> Pending Customer Booking
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-mono text-xs text-emerald-800 dark:text-emerald-300 truncate font-semibold">
+                    {selectedEvent.calendly_link}
+                  </span>
+                  <a
+                    href={selectedEvent.calendly_link}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center gap-1 bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 label-mono text-xs font-bold shrink-0 transition-all"
+                  >
+                    <ExternalLink className="w-3 h-3" />
+                    <span>Open</span>
+                  </a>
+                </div>
+                {selectedEvent.calendly_booked && selectedEvent.calendly_invitee_name && (
+                  <p className="mt-1.5 text-[11px] font-mono text-emerald-700 dark:text-emerald-400">
+                    ✓ Booked by: <strong>{selectedEvent.calendly_invitee_name}</strong>
+                    {selectedEvent.calendly_invitee_email ? ` (${selectedEvent.calendly_invitee_email})` : ""}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Conversation Transcript (if available from voice call) */}
+            {selectedEvent.transcript && (
+              <div className="space-y-1">
+                <span className="label-mono text-muted-foreground text-[10px] uppercase font-bold">AI Call Transcript</span>
+                <div className="max-h-40 overflow-y-auto font-mono text-[11px] bg-paper border border-ink/20 p-3 text-ink space-y-1.5">
+                  {typeof selectedEvent.transcript === "string" ? (
+                    <pre className="whitespace-pre-wrap font-mono text-[11px]">{selectedEvent.transcript}</pre>
+                  ) : Array.isArray(selectedEvent.transcript) ? (
+                    selectedEvent.transcript.map((t: any, idx: number) => (
+                      <div key={idx} className="flex gap-2">
+                        <span className="text-violet font-bold shrink-0">{t.speaker || "User"}:</span>
+                        <span className="text-ink">{t.message || t.text}</span>
+                      </div>
+                    ))
+                  ) : (
+                    <pre className="whitespace-pre-wrap font-mono text-[11px]">{JSON.stringify(selectedEvent.transcript, null, 2)}</pre>
+                  )}
+                </div>
               </div>
             )}
 
             {/* Bottom Modal Actions */}
             <div className="flex items-center justify-between pt-2 border-t border-ink/20">
               <button
+                type="button"
                 onClick={() => handleDeleteEvent(selectedEvent.id)}
                 className="flex items-center gap-1 text-xs font-mono text-red-500 hover:text-red-700"
               >
@@ -1051,18 +1344,50 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
               </button>
 
               <div className="flex items-center gap-2">
+                {selectedEvent.status === "new_booking" ? (
+                  <button
+                    type="button"
+                    onClick={() => handleApproveAndSendWhatsApp(selectedEvent.id)}
+                    disabled={approvingId === selectedEvent.id}
+                    className="flex items-center gap-1.5 px-4 py-2 label-mono text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition-all"
+                  >
+                    {approvingId === selectedEvent.id ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Check className="w-3.5 h-3.5" />
+                    )}
+                    <span>✓ Confirm & Send Calendly Link</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => handleSendWhatsApp(selectedEvent.id, selectedEvent.customer_phone)}
+                    disabled={waSending}
+                    className="flex items-center gap-1.5 px-3 py-2 label-mono text-xs font-bold border border-lime/50 bg-lime/10 text-lime-800 dark:text-lime hover:bg-lime/20 transition-all"
+                    title="Dispatch WhatsApp meeting invite with live video link"
+                  >
+                    <MessageSquare className="w-3.5 h-3.5 text-lime-600 dark:text-lime" />
+                    <span>{waSending ? "Sending..." : "Send WhatsApp"}</span>
+                  </button>
+                )}
+
                 <button
                   type="button"
-                  onClick={() => handleSendWhatsApp(selectedEvent.id, selectedEvent.customer_phone)}
-                  disabled={waSending}
-                  className="flex items-center gap-1.5 px-3 py-2 label-mono text-xs font-bold border border-lime/50 bg-lime/10 text-lime-800 dark:text-lime hover:bg-lime/20 transition-all"
-                  title="Dispatch WhatsApp meeting invite with Google Meet link"
+                  onClick={() => handleSendMeetingEmail(selectedEvent.id, selectedEvent.customer_email)}
+                  disabled={emailSending}
+                  className="flex items-center gap-1.5 px-3 py-2 label-mono text-xs font-bold border border-violet/40 bg-violet/10 text-violet dark:text-violet-300 hover:bg-violet/20 transition-all"
+                  title="Send meeting confirmation email with live video link to registered login email and client"
                 >
-                  <MessageSquare className="w-3.5 h-3.5 text-lime-600 dark:text-lime" />
-                  <span>{waSending ? "Sending..." : "Send WhatsApp"}</span>
+                  {emailSending ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-violet" />
+                  ) : (
+                    <Mail className="w-3.5 h-3.5 text-violet" />
+                  )}
+                  <span>{emailSending ? "Sending..." : "Send Email"}</span>
                 </button>
 
                 <button
+                  type="button"
                   onClick={(e) => handleMarkDone(e, selectedEvent.id, selectedEvent.status)}
                   className={`flex items-center gap-1.5 px-4 py-2 label-mono text-xs font-bold border transition-all ${
                     selectedEvent.status === "completed"
@@ -1071,7 +1396,7 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
                   }`}
                 >
                   <Check className={`w-3.5 h-3.5 ${selectedEvent.status === "completed" ? "text-lime-foreground" : "text-paper"}`} />
-                  <span>{selectedEvent.status === "completed" ? "Done (Completed)" : "Mark Done"}</span>
+                  <span>{selectedEvent.status === "completed" ? "Done" : "Mark Done"}</span>
                 </button>
               </div>
             </div>
@@ -1219,6 +1544,20 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
                 />
               </div>
 
+              <div className="flex items-center gap-2 pt-1 border-t border-ink/10">
+                <input
+                  type="checkbox"
+                  id="formSendConfirmation"
+                  checked={formSendConfirmation}
+                  onChange={(e) => setFormSendConfirmation(e.target.checked)}
+                  className="rounded border-ink/30 text-violet focus:ring-violet cursor-pointer"
+                />
+                <label htmlFor="formSendConfirmation" className="label-mono text-ink text-[11px] cursor-pointer flex items-center gap-1.5 select-none">
+                  <Mail className="w-3.5 h-3.5 text-violet" />
+                  <span>Send meeting link email to registered login email & client</span>
+                </label>
+              </div>
+
               <div className="pt-2 flex items-center justify-end gap-2.5">
                 <button
                   type="button"
@@ -1237,6 +1576,107 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ─────────────────── CALL TRANSCRIPT & REQUIREMENTS MODAL ─────────────────── */}
+      {viewTranscriptEvent && (
+        <div className="fixed inset-0 z-50 bg-ink/70 flex items-center justify-center p-4 backdrop-blur-xs">
+          <div className="border border-ink bg-card max-w-xl w-full p-6 space-y-4 shadow-2xl relative">
+            <button
+              type="button"
+              onClick={() => setViewTranscriptEvent(null)}
+              className="absolute right-4 top-4 p-1 text-muted-foreground hover:text-ink hover:bg-secondary"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <div>
+              <span className="label-mono text-violet text-[10px] uppercase font-bold tracking-wider">
+                AI Voice Agent Conversation Record
+              </span>
+              <h3 className="font-display text-lg font-extrabold uppercase tracking-tight text-ink mt-0.5">
+                {viewTranscriptEvent.title}
+              </h3>
+              <p className="text-xs font-mono text-muted-foreground mt-0.5">
+                Customer: <strong className="text-ink">{viewTranscriptEvent.customer_name}</strong> {viewTranscriptEvent.customer_phone ? `(${viewTranscriptEvent.customer_phone})` : ""}
+              </p>
+            </div>
+
+            {/* Topics & Agenda */}
+            {(viewTranscriptEvent.agenda || viewTranscriptEvent.description) && (
+              <div className="border border-ink/20 bg-paper p-3 text-xs font-mono">
+                <span className="label-mono text-muted-foreground text-[10px] uppercase font-bold block mb-1">
+                  Extracted Requirements & Agenda
+                </span>
+                <p className="text-ink leading-relaxed">
+                  {viewTranscriptEvent.agenda || viewTranscriptEvent.description}
+                </p>
+              </div>
+            )}
+
+            {/* Verbatim Transcript */}
+            <div className="space-y-1">
+              <span className="label-mono text-muted-foreground text-[10px] uppercase font-bold block">
+                Verbatim Call Transcript
+              </span>
+              <div className="max-h-64 overflow-y-auto border border-ink/20 bg-paper p-3 font-mono text-xs text-ink space-y-2">
+                {typeof viewTranscriptEvent.transcript === "string" ? (
+                  <pre className="whitespace-pre-wrap font-mono text-xs">{viewTranscriptEvent.transcript}</pre>
+                ) : Array.isArray(viewTranscriptEvent.transcript) ? (
+                  viewTranscriptEvent.transcript.map((t: any, idx: number) => (
+                    <div key={idx} className="flex gap-2 leading-relaxed">
+                      <span className="text-violet font-bold shrink-0">{t.speaker || "User"}:</span>
+                      <span className="text-ink">{t.message || t.text}</span>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-muted-foreground italic">No verbatim transcript captured for this call.</p>
+                )}
+              </div>
+            </div>
+
+            {/* Bottom Actions */}
+            <div className="flex items-center justify-between pt-3 border-t border-ink/20">
+              {viewTranscriptEvent.meet_url && (
+                <a
+                  href={viewTranscriptEvent.meet_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 text-xs font-mono text-violet hover:underline"
+                >
+                  <Video className="w-3.5 h-3.5" />
+                  <span>Test Video Room</span>
+                  <ExternalLink className="w-2.5 h-2.5" />
+                </a>
+              )}
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setViewTranscriptEvent(null)}
+                  className="px-3.5 py-1.5 border border-ink/20 bg-paper text-ink label-mono text-xs hover:bg-secondary"
+                >
+                  Close
+                </button>
+                {viewTranscriptEvent.status === "new_booking" && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const id = viewTranscriptEvent.id;
+                      setViewTranscriptEvent(null);
+                      handleApproveAndSendWhatsApp(id);
+                    }}
+                    disabled={approvingId === viewTranscriptEvent.id}
+                    className="px-4 py-1.5 border border-ink bg-emerald-600 hover:bg-emerald-700 text-white label-mono text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>✓ Confirm & Send Calendly Link</span>
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       )}

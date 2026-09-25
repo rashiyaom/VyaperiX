@@ -18,6 +18,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -160,8 +161,13 @@ _in_memory_calls: Dict[str, dict] = {}
 _in_memory_voice_campaigns: Dict[str, dict] = {}
 _in_memory_video_calls: Dict[str, dict] = {}
 _in_memory_calendar_events: Dict[str, dict] = {}
+_in_memory_prospect_leads: Dict[str, dict] = {}
+_in_memory_crm_settings: Dict[str, dict] = {}
+_in_memory_crm_records: Dict[str, dict] = {}
 _in_memory_profiles: Dict[str, dict] = {}
 _in_memory_voice_settings: Dict[str, str] = {}
+_in_memory_blocklist: Dict[str, dict] = {}
+_in_memory_guardrail_settings: Dict[str, dict] = {}
 
 # ─────────────────────────── Startup Initialization ──────────────────────
 
@@ -213,6 +219,10 @@ async def init_db():
             await _mongo_db["calendar_events"].create_index("id", unique=True, background=True)
             await _mongo_db["calendar_events"].create_index("user_id", background=True)
             await _mongo_db["calendar_events"].create_index("start_time", background=True)
+            await _mongo_db["blocklist"].create_index("phone", background=True)
+            await _mongo_db["blocklist"].create_index("status", background=True)
+            await _mongo_db["blocklist"].create_index("created_at", background=True)
+            await _mongo_db["guardrail_settings"].create_index("user_id", background=True)
             logger.info("MongoDB collection indexes verified.")
         except Exception as idx_err:
             logger.warning(f"Note on MongoDB index creation: {idx_err}")
@@ -260,6 +270,27 @@ async def get_profile_by_email(email: str) -> Optional[dict]:
     for p in _in_memory_profiles.values():
         if p.get("email", "").lower() == clean_email:
             return p
+    return None
+
+async def get_workspace_owner_profile() -> Optional[dict]:
+    """Fetch the workspace owner profile from MongoDB with memory fallback."""
+    try:
+        db = get_mongo_db()
+        # Find explicit owner
+        doc = await db["profiles"].find_one({"role": "owner"})
+        if not doc:
+            # Fallback to first profile registered
+            doc = await db["profiles"].find_one({})
+        if doc:
+            return _clean_doc(doc)
+    except Exception as e:
+        logger.warning(f"MongoDB get_workspace_owner_profile error: {e}")
+
+    for p in _in_memory_profiles.values():
+        if p.get("role") == "owner":
+            return p
+    if _in_memory_profiles:
+        return next(iter(_in_memory_profiles.values()))
     return None
 
 async def upsert_profile(user_id: str, profile_data: dict) -> dict:
@@ -398,6 +429,25 @@ async def update_analysis(report_id: str, analysis: dict):
     except Exception as e:
         logger.warning(f"MongoDB update_analysis error for {report_id}: {e}")
 
+async def update_report(report_id: str, updates: dict) -> Optional[dict]:
+    """Update arbitrary fields on a commercial due diligence report in MongoDB and memory."""
+    clean_updates = dict(updates)
+    clean_updates["updated_at"] = _now()
+    if report_id in _in_memory_reports:
+        _in_memory_reports[report_id].update(clean_updates)
+
+    if _mongo_connected:
+        try:
+            db = get_mongo_db()
+            await db["reports"].update_one({"id": report_id}, {"$set": clean_updates})
+            doc = await db["reports"].find_one({"id": report_id})
+            if doc:
+                return _clean_doc(doc)
+        except Exception as e:
+            logger.warning(f"MongoDB update_report error for {report_id}: {e}")
+
+    return _in_memory_reports.get(report_id)
+
 def _ensure_visual_intelligence(report: dict) -> tuple[dict, bool]:
     """Ensures timeline_roadmap is present for visual presentation."""
     analysis = report.get("analysis")
@@ -461,11 +511,12 @@ async def get_report(report_id: str) -> Optional[dict]:
     return None
 
 async def list_reports(user_id: Optional[str] = None, limit: int = 50) -> List[dict]:
-    """List recent intelligence reports from MongoDB with in-memory fallback."""
+    """List recent intelligence reports from MongoDB with in-memory fallback strictly isolated per user."""
     clean_uid = _clean_user_id(user_id)
-    query: Dict[str, Any] = {}
-    if clean_uid:
-        query = {"$or": [{"user_id": clean_uid}, {"user_id": None}]}
+    if not clean_uid:
+        return []
+
+    query = {"user_id": clean_uid}
 
     try:
         db = get_mongo_db()
@@ -484,7 +535,7 @@ async def list_reports(user_id: Optional[str] = None, limit: int = 50) -> List[d
 
         for mid, mrep in _in_memory_reports.items():
             if mid not in seen_ids:
-                if not clean_uid or mrep.get("user_id") in (clean_uid, None):
+                if mrep.get("user_id") == clean_uid:
                     rep_copy = dict(mrep)
                     rep_copy, _ = _ensure_visual_intelligence(rep_copy)
                     enriched_list.insert(0, rep_copy)
@@ -492,7 +543,7 @@ async def list_reports(user_id: Optional[str] = None, limit: int = 50) -> List[d
         return enriched_list[:limit]
     except Exception as e:
         logger.warning(f"MongoDB list_reports error: {e}")
-        return list(_in_memory_reports.values())[:limit]
+        return [r for r in _in_memory_reports.values() if r.get("user_id") == clean_uid][:limit]
 
 # ─────────────────────────── Voice Fleet Operations (MongoDB) ────────────
 
@@ -590,11 +641,12 @@ async def list_voice_calls(
     campaign_id: Optional[str] = None,
     limit: int = 100,
 ) -> List[dict]:
-    """List recent voice calls with optional filtering from MongoDB."""
+    """List recent voice calls with optional filtering from MongoDB strictly isolated per user."""
     clean_uid = _clean_user_id(user_id)
-    query: Dict[str, Any] = {}
-    if clean_uid:
-        query["$or"] = [{"user_id": clean_uid}, {"user_id": None}]
+    if not clean_uid:
+        return []
+
+    query: Dict[str, Any] = {"user_id": clean_uid}
     if direction and direction != "all":
         query["direction"] = direction
     if status and status != "all":
@@ -609,9 +661,7 @@ async def list_voice_calls(
         return [_clean_doc(d) for d in docs]
     except Exception as e:
         logger.warning(f"MongoDB list_voice_calls error: {e}")
-        calls = list(_in_memory_calls.values())
-        if clean_uid:
-            calls = [c for c in calls if c.get("user_id") in (clean_uid, None)]
+        calls = [c for c in _in_memory_calls.values() if c.get("user_id") == clean_uid]
         if direction and direction != "all":
             calls = [c for c in calls if c.get("direction") == direction]
         if status and status != "all":
@@ -825,11 +875,12 @@ async def list_video_calls(
     user_id: Optional[str] = None,
     limit: int = 100,
 ) -> List[dict]:
-    """List recent video calls for a user from MongoDB with memory fallback."""
+    """List recent video calls for a user from MongoDB with memory fallback strictly isolated per user."""
     clean_uid = _clean_user_id(user_id)
-    query: Dict[str, Any] = {}
-    if clean_uid:
-        query["$or"] = [{"user_id": clean_uid}, {"user_id": None}]
+    if not clean_uid:
+        return []
+
+    query: Dict[str, Any] = {"user_id": clean_uid}
 
     try:
         db = get_mongo_db()
@@ -838,9 +889,7 @@ async def list_video_calls(
         return [_clean_doc(d) for d in docs]
     except Exception as e:
         logger.warning(f"MongoDB list_video_calls error: {e}")
-        calls = list(_in_memory_video_calls.values())
-        if clean_uid:
-            calls = [c for c in calls if c.get("user_id") in (clean_uid, None)]
+        calls = [c for c in _in_memory_video_calls.values() if c.get("user_id") == clean_uid]
         return calls[:limit]
 
 async def get_video_call_by_tavus_id(tavus_conversation_id: str) -> Optional[dict]:
@@ -922,11 +971,12 @@ async def list_calendar_events(
     customer_name: Optional[str] = None,
     limit: int = 100,
 ) -> List[dict]:
-    """List calendar events from MongoDB filtered by user, status, date bounds, or customer name."""
+    """List calendar events from MongoDB filtered by user, status, date bounds, or customer name strictly isolated per user."""
     clean_uid = _clean_user_id(user_id)
+
     query: Dict[str, Any] = {}
     if clean_uid:
-        query["$or"] = [{"user_id": clean_uid}, {"user_id": None}]
+        query["user_id"] = clean_uid
     if status and status != "all":
         query["status"] = status
     if start_date:
@@ -946,9 +996,7 @@ async def list_calendar_events(
         return [_clean_doc(d) for d in docs]
     except Exception as e:
         logger.warning(f"MongoDB list_calendar_events error: {e}")
-        events = list(_in_memory_calendar_events.values())
-        if clean_uid:
-            events = [e for e in events if e.get("user_id") in (clean_uid, None)]
+        events = [e for e in _in_memory_calendar_events.values() if not clean_uid or e.get("user_id") == clean_uid]
         if status and status != "all":
             events = [e for e in events if e.get("status") == status]
         if customer_name:
@@ -988,3 +1036,423 @@ async def delete_calendar_event(event_id: str) -> bool:
     except Exception as e:
         logger.warning(f"MongoDB delete_calendar_event error for {event_id}: {e}")
         return True
+
+
+# ─────────────────────────── Prospect Leads (Apollo + DDG) ───────────────
+
+async def save_prospect_lead(lead_data: dict, user_id: Optional[str] = None) -> str:
+    """Save or update an enriched prospect lead in MongoDB and cache."""
+    lead_id = lead_data.get("id") or str(uuid.uuid4())
+    clean_uid = _clean_user_id(user_id or lead_data.get("user_id"))
+    now = _now_iso()
+
+    row = dict(lead_data)
+    row["id"] = lead_id
+    row["user_id"] = clean_uid
+    row["created_at"] = row.get("created_at") or now
+    row["updated_at"] = now
+
+    _in_memory_prospect_leads[lead_id] = dict(row)
+
+    if _mongo_connected:
+        try:
+            db = get_mongo_db()
+            await db["prospect_leads"].update_one({"id": lead_id}, {"$set": dict(row)}, upsert=True)
+        except Exception as e:
+            logger.warning(f"MongoDB save_prospect_lead error for {lead_id}: {e}")
+
+    return lead_id
+
+
+async def save_prospect_leads_batch(leads: List[dict], user_id: Optional[str] = None) -> List[dict]:
+    """Save a list of prospect leads."""
+    saved = []
+    for l in leads:
+        lid = await save_prospect_lead(l, user_id=user_id)
+        saved.append(_in_memory_prospect_leads.get(lid, l))
+    return saved
+
+
+async def get_prospect_lead(lead_id: str) -> Optional[dict]:
+    """Fetch single prospect lead by ID."""
+    if _mongo_connected:
+        try:
+            db = get_mongo_db()
+            doc = await db["prospect_leads"].find_one({"id": lead_id})
+            if doc:
+                cleaned = _clean_doc(doc)
+                _in_memory_prospect_leads[lead_id] = cleaned
+                return cleaned
+        except Exception as e:
+            logger.warning(f"MongoDB get_prospect_lead error for {lead_id}: {e}")
+
+    return _in_memory_prospect_leads.get(lead_id)
+
+
+async def list_prospect_leads(user_id: Optional[str] = None, limit: int = 50) -> List[dict]:
+    """List prospect leads ordered by updated_at descending strictly isolated per user."""
+    clean_uid = _clean_user_id(user_id)
+    if not clean_uid:
+        return []
+
+    query: Dict[str, Any] = {"user_id": clean_uid}
+    if _mongo_connected:
+        try:
+            db = get_mongo_db()
+            cursor = db["prospect_leads"].find(query).sort("updated_at", -1).limit(limit)
+            docs = await cursor.to_list(length=limit)
+            return [_clean_doc(d) for d in docs]
+        except Exception as e:
+            logger.warning(f"MongoDB list_prospect_leads error: {e}")
+
+    leads = [l for l in _in_memory_prospect_leads.values() if l.get("user_id") == clean_uid]
+    leads.sort(key=lambda x: x.get("updated_at", ""), reverse=True)
+    return leads[:limit]
+
+
+async def update_prospect_lead(lead_id: str, updates: dict) -> Optional[dict]:
+    """Update fields on a prospect lead."""
+    clean_updates = dict(updates)
+    clean_updates["updated_at"] = _now_iso()
+
+    if lead_id in _in_memory_prospect_leads:
+        _in_memory_prospect_leads[lead_id].update(clean_updates)
+
+    if _mongo_connected:
+        try:
+            db = get_mongo_db()
+            await db["prospect_leads"].update_one({"id": lead_id}, {"$set": clean_updates})
+            doc = await db["prospect_leads"].find_one({"id": lead_id})
+            if doc:
+                return _clean_doc(doc)
+        except Exception as e:
+            logger.warning(f"MongoDB update_prospect_lead error for {lead_id}: {e}")
+
+    return _in_memory_prospect_leads.get(lead_id)
+
+
+# ─────────────────────────── CRM & Pipeline (HubSpot + Webhook) ─────────
+
+async def save_crm_settings(settings: dict, user_id: Optional[str] = None) -> dict:
+    """Save user CRM credentials and auto-sync toggles in MongoDB and cache."""
+    clean_uid = _clean_user_id(user_id) or "default_user"
+    now = _now_iso()
+
+    row = dict(settings)
+    row["user_id"] = clean_uid
+    row["updated_at"] = now
+
+    _in_memory_crm_settings[clean_uid] = dict(row)
+
+    if _mongo_connected:
+        try:
+            db = get_mongo_db()
+            await db["crm_settings"].update_one(
+                {"user_id": clean_uid},
+                {"$set": dict(row)},
+                upsert=True,
+            )
+        except Exception as e:
+            logger.warning(f"MongoDB save_crm_settings error: {e}")
+
+    return row
+
+
+async def get_crm_settings(user_id: Optional[str] = None) -> dict:
+    """Fetch user CRM settings from MongoDB with defaults."""
+    clean_uid = _clean_user_id(user_id) or "default_user"
+
+    if _mongo_connected:
+        try:
+            db = get_mongo_db()
+            doc = await db["crm_settings"].find_one({"user_id": clean_uid})
+            if doc:
+                cleaned = _clean_doc(doc)
+                _in_memory_crm_settings[clean_uid] = cleaned
+                return cleaned
+        except Exception as e:
+            logger.warning(f"MongoDB get_crm_settings error: {e}")
+
+    cached = _in_memory_crm_settings.get(clean_uid)
+    if cached:
+        return cached
+
+    # Return clean defaults from environment
+    return {
+        "user_id": clean_uid,
+        "provider": "hubspot",
+        "access_token": os.getenv("HUBSPOT_ACCESS_TOKEN", ""),
+        "webhook_url": os.getenv("CRM_WEBHOOK_URL", ""),
+        "auto_sync_radar": True,
+        "auto_sync_meetings": True,
+        "auto_sync_calls": True,
+        "updated_at": _now_iso(),
+    }
+
+
+async def save_crm_record(record: dict, user_id: Optional[str] = None) -> str:
+    """Save or update a synced CRM record (contact / deal / meeting) in MongoDB."""
+    rec_id = record.get("id") or str(uuid.uuid4())
+    clean_uid = _clean_user_id(user_id or record.get("user_id"))
+    now = _now_iso()
+
+    row = dict(record)
+    row["id"] = rec_id
+    row["user_id"] = clean_uid
+    row["synced_at"] = row.get("synced_at") or now
+    row["updated_at"] = now
+
+    _in_memory_crm_records[rec_id] = dict(row)
+
+    if _mongo_connected:
+        try:
+            db = get_mongo_db()
+            await db["crm_records"].update_one({"id": rec_id}, {"$set": dict(row)}, upsert=True)
+        except Exception as e:
+            logger.warning(f"MongoDB save_crm_record error: {e}")
+
+    return rec_id
+
+
+async def list_crm_records(user_id: Optional[str] = None, limit: int = 100) -> List[dict]:
+    """List synced CRM records ordered by synced_at descending strictly isolated per user."""
+    clean_uid = _clean_user_id(user_id)
+    if not clean_uid:
+        return []
+
+    query: Dict[str, Any] = {"user_id": clean_uid}
+    if _mongo_connected:
+        try:
+            db = get_mongo_db()
+            cursor = db["crm_records"].find(query).sort("synced_at", -1).limit(limit)
+            docs = await cursor.to_list(length=limit)
+            return [_clean_doc(d) for d in docs]
+        except Exception as e:
+            logger.warning(f"MongoDB list_crm_records error: {e}")
+
+    records = [r for r in _in_memory_crm_records.values() if r.get("user_id") == clean_uid]
+    records.sort(key=lambda x: x.get("synced_at", ""), reverse=True)
+    return records[:limit]
+
+
+async def get_crm_record_by_lead_id(lead_id: str) -> Optional[dict]:
+    """Retrieve CRM sync record by associated prospect lead ID."""
+    if _mongo_connected:
+        try:
+            db = get_mongo_db()
+            doc = await db["crm_records"].find_one({"lead_id": lead_id})
+            if doc:
+                return _clean_doc(doc)
+        except Exception as e:
+            logger.warning(f"MongoDB get_crm_record_by_lead_id error: {e}")
+
+    for r in _in_memory_crm_records.values():
+        if r.get("lead_id") == lead_id:
+            return r
+    return None
+
+
+# ─────────────────────────── Hate Speech Guardrail & Blocklist ────────────
+
+def normalize_phone(phone: Optional[str]) -> str:
+    """Normalize phone number to digits-only with optional leading +."""
+    if not phone:
+        return ""
+    raw = str(phone).strip()
+    digits = re.sub(r"[^\d+]", "", raw)
+    if digits.startswith("+"):
+        return "+" + re.sub(r"[^\d]", "", digits[1:])
+    return re.sub(r"[^\d]", "", digits)
+
+
+async def add_to_blocklist(block_data: dict) -> dict:
+    """
+    Add a phone number to the Blocklist with reason, transcript snippet, severity, etc.
+    """
+    raw_phone = block_data.get("phone", "")
+    norm_phone = normalize_phone(raw_phone)
+    if not norm_phone:
+        raise ValueError("Cannot block: missing or invalid phone number")
+
+    rec_id = block_data.get("id") or str(uuid.uuid4())
+    now = _now_iso()
+
+    entry = {
+        "id": rec_id,
+        "phone": norm_phone,
+        "raw_phone": raw_phone,
+        "customer_name": (block_data.get("customer_name") or "Unknown Caller").strip(),
+        "reason": (block_data.get("reason") or "Abusive speech / policy violation").strip(),
+        "transcript_snippet": (block_data.get("transcript_snippet") or "").strip(),
+        "language": block_data.get("language") or "auto",
+        "severity": block_data.get("severity") or "high",
+        "category": block_data.get("category") or "hate_speech",
+        "blocked_by": block_data.get("blocked_by") or "ai_guardrail",
+        "call_id": block_data.get("call_id"),
+        "status": "active",
+        "created_at": now,
+        "updated_at": now,
+    }
+
+    _in_memory_blocklist[rec_id] = dict(entry)
+
+    if _mongo_connected:
+        try:
+            db = get_mongo_db()
+            await db["blocklist"].update_one(
+                {"phone": norm_phone},
+                {"$set": dict(entry)},
+                upsert=True,
+            )
+        except Exception as e:
+            logger.warning(f"MongoDB add_to_blocklist error for {norm_phone}: {e}")
+
+    return entry
+
+
+async def remove_from_blocklist(phone_or_id: str) -> bool:
+    """Unblock a phone number by setting status to 'unblocked'."""
+    key = str(phone_or_id).strip()
+    norm_phone = normalize_phone(key)
+
+    found = False
+    for rec in _in_memory_blocklist.values():
+        if rec.get("id") == key or rec.get("phone") == norm_phone:
+            rec["status"] = "unblocked"
+            rec["unblocked_at"] = _now_iso()
+            found = True
+
+    if _mongo_connected:
+        try:
+            db = get_mongo_db()
+            res = await db["blocklist"].update_many(
+                {"$or": [{"id": key}, {"phone": norm_phone}]},
+                {"$set": {"status": "unblocked", "unblocked_at": _now_iso()}},
+            )
+            if res.modified_count > 0:
+                found = True
+        except Exception as e:
+            logger.warning(f"MongoDB remove_from_blocklist error: {e}")
+
+    return found
+
+
+async def is_number_blocked(phone: Optional[str]) -> tuple[bool, Optional[dict]]:
+    """
+    Check if a phone number is currently active in the blocklist.
+    Returns (is_blocked: bool, block_record: Optional[dict]).
+    """
+    if not phone:
+        return False, None
+    norm = normalize_phone(phone)
+    if not norm:
+        return False, None
+
+    last_10 = norm[-10:] if len(norm) >= 10 else norm
+
+    if _mongo_connected:
+        try:
+            db = get_mongo_db()
+            doc = await db["blocklist"].find_one({
+                "status": "active",
+                "$or": [
+                    {"phone": norm},
+                    {"phone": {"$regex": f"{re.escape(last_10)}$"}},
+                ],
+            })
+            if doc:
+                return True, _clean_doc(doc)
+        except Exception as e:
+            logger.warning(f"MongoDB is_number_blocked error: {e}")
+
+    for rec in _in_memory_blocklist.values():
+        if rec.get("status") == "active":
+            r_phone = rec.get("phone", "")
+            if r_phone == norm or (len(r_phone) >= 10 and r_phone[-10:] == last_10):
+                return True, rec
+
+    return False, None
+
+
+async def list_blocklist(status: Optional[str] = "active", limit: int = 200) -> List[dict]:
+    """List blocked numbers sorted newest first."""
+    query: Dict[str, Any] = {}
+    if status and status != "all":
+        query["status"] = status
+
+    if _mongo_connected:
+        try:
+            db = get_mongo_db()
+            cursor = db["blocklist"].find(query).sort("created_at", -1).limit(limit)
+            docs = await cursor.to_list(length=limit)
+            return [_clean_doc(d) for d in docs]
+        except Exception as e:
+            logger.warning(f"MongoDB list_blocklist error: {e}")
+
+    items = list(_in_memory_blocklist.values())
+    if status and status != "all":
+        items = [i for i in items if i.get("status") == status]
+    items.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+    return items[:limit]
+
+
+DEFAULT_GUARDRAIL_SETTINGS = {
+    "auto_block_enabled": True,
+    "sensitivity": "balanced",  # strict | balanced | lenient
+    "action_on_rude": "warn",   # warn | disconnect
+    "max_strikes": 2,
+    "warning_phrase": "I understand you may be upset, but please maintain polite and respectful language so I can assist you.",
+    "termination_phrase": "This call is being terminated due to abusive or inappropriate language. Have a good day.",
+    "secret_pin": "8899",
+    "languages_monitored": [
+        "Hindi", "Gujarati", "English", "Tamil", "Telugu",
+        "Marathi", "Bengali", "Kannada", "Malayalam", "Punjabi", "Odia"
+    ],
+}
+
+
+async def get_guardrail_settings(user_id: Optional[str] = None) -> dict:
+    """Retrieve guardrail & blocklist configuration."""
+    clean_uid = _clean_user_id(user_id) or "global"
+    if _mongo_connected:
+        try:
+            db = get_mongo_db()
+            doc = await db["guardrail_settings"].find_one({"user_id": clean_uid})
+            if doc:
+                res = dict(DEFAULT_GUARDRAIL_SETTINGS)
+                res.update(_clean_doc(doc))
+                return res
+        except Exception as e:
+            logger.warning(f"MongoDB get_guardrail_settings error: {e}")
+
+    cached = _in_memory_guardrail_settings.get(clean_uid)
+    if cached:
+        res = dict(DEFAULT_GUARDRAIL_SETTINGS)
+        res.update(cached)
+        return res
+
+    return dict(DEFAULT_GUARDRAIL_SETTINGS)
+
+
+async def update_guardrail_settings(updates: dict, user_id: Optional[str] = None) -> dict:
+    """Update guardrail configuration and secret PIN."""
+    clean_uid = _clean_user_id(user_id) or "global"
+    current = await get_guardrail_settings(clean_uid)
+    current.update(updates)
+    current["user_id"] = clean_uid
+    current["updated_at"] = _now_iso()
+
+    _in_memory_guardrail_settings[clean_uid] = dict(current)
+
+    if _mongo_connected:
+        try:
+            db = get_mongo_db()
+            await db["guardrail_settings"].update_one(
+                {"user_id": clean_uid},
+                {"$set": dict(current)},
+                upsert=True,
+            )
+        except Exception as e:
+            logger.warning(f"MongoDB update_guardrail_settings error: {e}")
+
+    return current

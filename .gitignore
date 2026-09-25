@@ -61,8 +61,25 @@ frontend/public/sample_4k/*.png
 # MongoDB local storage
 mongodb_data/
 backend/mongodb_data/
+backend/data/
 
 # Phase 0 & measurement metrics logs (local only — never commit)
 backend/logs/*
 !backend/logs/.gitkeep
+
+# Mobile App & Capacitor (Local native builds only - never commit to main)
+frontend/android/
+frontend/ios/
+frontend/assets/
+frontend/capacitor-template/
+frontend/capacitor.config.ts
+frontend/scripts/prepare-capacitor.js
+backend/scripts/generate_app_icons.py
+frontend/public/app-icon.png
+frontend/public/app-icon.svg
+frontend/public/splash.png
+*.apk
+*.aab
+apk/
+.vscode/
 
