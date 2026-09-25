@@ -181,13 +181,13 @@ export function WhatsAppModule({ companyName = "VyaperiX" }: WhatsAppModuleProps
     }
   };
 
+  const isConnected = Boolean(statusData?.connected);
+
   useEffect(() => {
     fetchStatus();
     const interval = setInterval(fetchStatus, isConnected ? 10000 : 4000);
     return () => clearInterval(interval);
   }, [isConnected]);
-
-  const isConnected = Boolean(statusData?.connected);
 
   return (
     <div className="space-y-6 max-w-5xl">
