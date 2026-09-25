@@ -115,6 +115,18 @@ async def create_single_call(
         except Exception:
             pass
 
+    # ── Hate Speech & Abuse Blocklist Pre-Call Interception ───────────────
+    is_blocked, block_info = await db.is_number_blocked(payload.customer_phone)
+    if is_blocked:
+        reason = block_info.get("reason", "Hate speech / policy violation") if block_info else "Blacklisted"
+        logger.warning(f"🚫 Blocked outbound call attempt to blacklisted number {payload.customer_phone}: {reason}")
+        return {
+            "success": False,
+            "blocked": True,
+            "error": f"Call Blocked: {payload.customer_phone} is in the Blocklist ({reason}).",
+            "block_record": block_info,
+        }
+
     call_id = str(uuid.uuid4())
     call_data = {
         "id": call_id,
@@ -167,6 +179,19 @@ async def direct_outbound_call(payload: DirectOutboundCallRequest):
     """
     call_id = str(uuid.uuid4())
     formatted_phone = sarvam_service.format_e164_phone_number(payload.phone_number)
+
+    # ── Hate Speech & Abuse Blocklist Pre-Call Interception ───────────────
+    is_blocked, block_info = await db.is_number_blocked(formatted_phone)
+    if is_blocked:
+        reason = block_info.get("reason", "Hate speech / policy violation") if block_info else "Blacklisted"
+        logger.warning(f"🚫 Blocked direct call attempt to blacklisted number {formatted_phone}: {reason}")
+        return {
+            "success": False,
+            "blocked": True,
+            "error": f"Call Blocked: {formatted_phone} is in the Blocklist ({reason}).",
+            "block_record": block_info,
+        }
+
     customer_name = (payload.customer_name or "Customer").strip()
     business_name = (payload.business_name or "Vyepari CRM").strip()
     call_reason = (payload.call_reason or "Outbound Consultation").strip()
@@ -219,6 +244,12 @@ async def create_batch_calls(payload: BatchCallRequest, background_tasks: Backgr
 
     async def _process_batch(items: List[CallRequest], camp_id: str, force_sim: bool, fallback_user_id: Optional[str] = None):
         for item in items:
+            # Skip any blacklisted numbers in campaign dialer
+            is_blocked, _ = await db.is_number_blocked(item.customer_phone)
+            if is_blocked:
+                logger.info(f"🚫 Auto-skipping campaign call to blocked number: {item.customer_phone}")
+                continue
+
             c_id = str(uuid.uuid4())
             call_data = {
                 "id": c_id,

@@ -2535,6 +2535,41 @@ export function VoiceFleetModule({
               </div>
             </div>
 
+            {/* Hate Speech & Abuse Guardrail Section */}
+            <div className="space-y-3 border border-red-500/30 bg-red-500/5 dark:bg-red-950/20 p-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse" />
+                  <div>
+                    <span className="label-mono text-[10px] text-red-700 dark:text-red-400 uppercase font-bold tracking-wider block">
+                      Trust & Safety — Multi-Lingual Speech Guardrail & Blacklist
+                    </span>
+                    <span className="text-[11px] text-muted-foreground font-mono">
+                      Real-time protection against hate speech, insults, and harassment across 10+ Indic languages.
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (typeof window !== "undefined") {
+                      try {
+                        localStorage.setItem("vyaperi_active_nav", "guardrail");
+                        const url = new URL(window.location.href);
+                        url.searchParams.set("tab", "guardrail");
+                        window.history.replaceState(null, "", url.toString());
+                        window.location.reload();
+                      } catch {}
+                    }
+                  }}
+                  className="px-3.5 py-1.5 bg-red-600 hover:bg-red-500 text-white font-mono text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5 shrink-0"
+                >
+                  <Ban className="w-3.5 h-3.5" />
+                  Manage Blocked Numbers (PIN: 8899)
+                </button>
+              </div>
+            </div>
+
             <div className="pt-2 flex items-center justify-between">
               <button
                 type="submit"

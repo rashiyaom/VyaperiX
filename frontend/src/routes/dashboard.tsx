@@ -92,6 +92,7 @@ import { CRMModule } from "@/components/modules/crm";
 import { AnalyticsModule } from "@/components/modules/analytics";
 import { SettingsModule } from "@/components/modules/settings";
 import { OverviewDashboard } from "@/components/modules/overview";
+import { SecretGuardrailPanel } from "@/components/modules/guardrail/SecretGuardrailPanel";
 import { MODULE_REGISTRY } from "@/modules/registry";
 import { ThemeToggle } from "@/components/app/theme";
 import { LangSwitcher } from "@/components/app/lang";
@@ -2009,6 +2010,18 @@ function DashboardPage() {
     return () => clearInterval(id);
   }, []);
 
+  // Secret Shortcut: Cmd+Shift+G or Ctrl+Shift+G opens the Secret Guardrail Panel
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === "G" || e.key === "g")) {
+        e.preventDefault();
+        handleSelectNav("guardrail");
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
   const userId = user?.id;
 
   useEffect(() => {
@@ -2247,6 +2260,20 @@ function DashboardPage() {
 
             {/* 🌐 Multi-Language Switcher */}
             <LangSwitcher />
+
+            {/* 🛡️ Secret Guardrail & Blacklist Trigger */}
+            <button
+              onClick={() => handleSelectNav("guardrail")}
+              title="Trust & Safety Guardrail (Shortcut: Cmd+Shift+G)"
+              className={`p-1.5 rounded-lg border transition-all text-xs flex items-center gap-1.5 ${
+                activeNav === "guardrail"
+                  ? "border-red-500/50 bg-red-500/10 text-red-500 shadow-sm"
+                  : "border-ink/20 hover:border-red-500/40 hover:bg-secondary text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <ShieldAlert className="w-3.5 h-3.5 text-red-500" />
+              <span className="hidden xl:inline font-mono text-[9px] font-bold uppercase tracking-wider">Shield</span>
+            </button>
 
             {/* Time — large screens only */}
             <div className="hidden lg:block border border-ink/20 px-3 py-1.5 font-mono text-[10px] text-muted-foreground">
@@ -2587,6 +2614,11 @@ function DashboardPage() {
 
             {/* 5. Settings View */}
             {activeNav === "settings" && <SettingsModule companyName={activeCompanyInfo.name} />}
+
+            {/* 9. Secret Hate Speech Guardrail & Blocklist Panel */}
+            {activeNav === "guardrail" && (
+              <SecretGuardrailPanel onClose={() => handleSelectNav("overview")} />
+            )}
           </div>
         </main>
       </div>

@@ -18,6 +18,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -165,6 +166,8 @@ _in_memory_crm_settings: Dict[str, dict] = {}
 _in_memory_crm_records: Dict[str, dict] = {}
 _in_memory_profiles: Dict[str, dict] = {}
 _in_memory_voice_settings: Dict[str, str] = {}
+_in_memory_blocklist: Dict[str, dict] = {}
+_in_memory_guardrail_settings: Dict[str, dict] = {}
 
 # ─────────────────────────── Startup Initialization ──────────────────────
 
@@ -216,6 +219,10 @@ async def init_db():
             await _mongo_db["calendar_events"].create_index("id", unique=True, background=True)
             await _mongo_db["calendar_events"].create_index("user_id", background=True)
             await _mongo_db["calendar_events"].create_index("start_time", background=True)
+            await _mongo_db["blocklist"].create_index("phone", background=True)
+            await _mongo_db["blocklist"].create_index("status", background=True)
+            await _mongo_db["blocklist"].create_index("created_at", background=True)
+            await _mongo_db["guardrail_settings"].create_index("user_id", background=True)
             logger.info("MongoDB collection indexes verified.")
         except Exception as idx_err:
             logger.warning(f"Note on MongoDB index creation: {idx_err}")
@@ -1243,3 +1250,209 @@ async def get_crm_record_by_lead_id(lead_id: str) -> Optional[dict]:
         if r.get("lead_id") == lead_id:
             return r
     return None
+
+
+# ─────────────────────────── Hate Speech Guardrail & Blocklist ────────────
+
+def normalize_phone(phone: Optional[str]) -> str:
+    """Normalize phone number to digits-only with optional leading +."""
+    if not phone:
+        return ""
+    raw = str(phone).strip()
+    digits = re.sub(r"[^\d+]", "", raw)
+    if digits.startswith("+"):
+        return "+" + re.sub(r"[^\d]", "", digits[1:])
+    return re.sub(r"[^\d]", "", digits)
+
+
+async def add_to_blocklist(block_data: dict) -> dict:
+    """
+    Add a phone number to the Blocklist with reason, transcript snippet, severity, etc.
+    """
+    raw_phone = block_data.get("phone", "")
+    norm_phone = normalize_phone(raw_phone)
+    if not norm_phone:
+        raise ValueError("Cannot block: missing or invalid phone number")
+
+    rec_id = block_data.get("id") or str(uuid.uuid4())
+    now = _now_iso()
+
+    entry = {
+        "id": rec_id,
+        "phone": norm_phone,
+        "raw_phone": raw_phone,
+        "customer_name": (block_data.get("customer_name") or "Unknown Caller").strip(),
+        "reason": (block_data.get("reason") or "Abusive speech / policy violation").strip(),
+        "transcript_snippet": (block_data.get("transcript_snippet") or "").strip(),
+        "language": block_data.get("language") or "auto",
+        "severity": block_data.get("severity") or "high",
+        "category": block_data.get("category") or "hate_speech",
+        "blocked_by": block_data.get("blocked_by") or "ai_guardrail",
+        "call_id": block_data.get("call_id"),
+        "status": "active",
+        "created_at": now,
+        "updated_at": now,
+    }
+
+    _in_memory_blocklist[rec_id] = dict(entry)
+
+    if _mongo_connected:
+        try:
+            db = get_mongo_db()
+            await db["blocklist"].update_one(
+                {"phone": norm_phone},
+                {"$set": dict(entry)},
+                upsert=True,
+            )
+        except Exception as e:
+            logger.warning(f"MongoDB add_to_blocklist error for {norm_phone}: {e}")
+
+    return entry
+
+
+async def remove_from_blocklist(phone_or_id: str) -> bool:
+    """Unblock a phone number by setting status to 'unblocked'."""
+    key = str(phone_or_id).strip()
+    norm_phone = normalize_phone(key)
+
+    found = False
+    for rec in _in_memory_blocklist.values():
+        if rec.get("id") == key or rec.get("phone") == norm_phone:
+            rec["status"] = "unblocked"
+            rec["unblocked_at"] = _now_iso()
+            found = True
+
+    if _mongo_connected:
+        try:
+            db = get_mongo_db()
+            res = await db["blocklist"].update_many(
+                {"$or": [{"id": key}, {"phone": norm_phone}]},
+                {"$set": {"status": "unblocked", "unblocked_at": _now_iso()}},
+            )
+            if res.modified_count > 0:
+                found = True
+        except Exception as e:
+            logger.warning(f"MongoDB remove_from_blocklist error: {e}")
+
+    return found
+
+
+async def is_number_blocked(phone: Optional[str]) -> tuple[bool, Optional[dict]]:
+    """
+    Check if a phone number is currently active in the blocklist.
+    Returns (is_blocked: bool, block_record: Optional[dict]).
+    """
+    if not phone:
+        return False, None
+    norm = normalize_phone(phone)
+    if not norm:
+        return False, None
+
+    last_10 = norm[-10:] if len(norm) >= 10 else norm
+
+    if _mongo_connected:
+        try:
+            db = get_mongo_db()
+            doc = await db["blocklist"].find_one({
+                "status": "active",
+                "$or": [
+                    {"phone": norm},
+                    {"phone": {"$regex": f"{re.escape(last_10)}$"}},
+                ],
+            })
+            if doc:
+                return True, _clean_doc(doc)
+        except Exception as e:
+            logger.warning(f"MongoDB is_number_blocked error: {e}")
+
+    for rec in _in_memory_blocklist.values():
+        if rec.get("status") == "active":
+            r_phone = rec.get("phone", "")
+            if r_phone == norm or (len(r_phone) >= 10 and r_phone[-10:] == last_10):
+                return True, rec
+
+    return False, None
+
+
+async def list_blocklist(status: Optional[str] = "active", limit: int = 200) -> List[dict]:
+    """List blocked numbers sorted newest first."""
+    query: Dict[str, Any] = {}
+    if status and status != "all":
+        query["status"] = status
+
+    if _mongo_connected:
+        try:
+            db = get_mongo_db()
+            cursor = db["blocklist"].find(query).sort("created_at", -1).limit(limit)
+            docs = await cursor.to_list(length=limit)
+            return [_clean_doc(d) for d in docs]
+        except Exception as e:
+            logger.warning(f"MongoDB list_blocklist error: {e}")
+
+    items = list(_in_memory_blocklist.values())
+    if status and status != "all":
+        items = [i for i in items if i.get("status") == status]
+    items.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+    return items[:limit]
+
+
+DEFAULT_GUARDRAIL_SETTINGS = {
+    "auto_block_enabled": True,
+    "sensitivity": "balanced",  # strict | balanced | lenient
+    "action_on_rude": "warn",   # warn | disconnect
+    "max_strikes": 2,
+    "warning_phrase": "I understand you may be upset, but please maintain polite and respectful language so I can assist you.",
+    "termination_phrase": "This call is being terminated due to abusive or inappropriate language. Have a good day.",
+    "secret_pin": "8899",
+    "languages_monitored": [
+        "Hindi", "Gujarati", "English", "Tamil", "Telugu",
+        "Marathi", "Bengali", "Kannada", "Malayalam", "Punjabi", "Odia"
+    ],
+}
+
+
+async def get_guardrail_settings(user_id: Optional[str] = None) -> dict:
+    """Retrieve guardrail & blocklist configuration."""
+    clean_uid = _clean_user_id(user_id) or "global"
+    if _mongo_connected:
+        try:
+            db = get_mongo_db()
+            doc = await db["guardrail_settings"].find_one({"user_id": clean_uid})
+            if doc:
+                res = dict(DEFAULT_GUARDRAIL_SETTINGS)
+                res.update(_clean_doc(doc))
+                return res
+        except Exception as e:
+            logger.warning(f"MongoDB get_guardrail_settings error: {e}")
+
+    cached = _in_memory_guardrail_settings.get(clean_uid)
+    if cached:
+        res = dict(DEFAULT_GUARDRAIL_SETTINGS)
+        res.update(cached)
+        return res
+
+    return dict(DEFAULT_GUARDRAIL_SETTINGS)
+
+
+async def update_guardrail_settings(updates: dict, user_id: Optional[str] = None) -> dict:
+    """Update guardrail configuration and secret PIN."""
+    clean_uid = _clean_user_id(user_id) or "global"
+    current = await get_guardrail_settings(clean_uid)
+    current.update(updates)
+    current["user_id"] = clean_uid
+    current["updated_at"] = _now_iso()
+
+    _in_memory_guardrail_settings[clean_uid] = dict(current)
+
+    if _mongo_connected:
+        try:
+            db = get_mongo_db()
+            await db["guardrail_settings"].update_one(
+                {"user_id": clean_uid},
+                {"$set": dict(current)},
+                upsert=True,
+            )
+        except Exception as e:
+            logger.warning(f"MongoDB update_guardrail_settings error: {e}")
+
+    return current
