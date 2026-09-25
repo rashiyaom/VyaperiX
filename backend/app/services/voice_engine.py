@@ -536,11 +536,12 @@ async def dispatch_vapi_call(
         ],
         "transcriber": {
             "provider": "deepgram",
-            "model": "flux-general-multi",
+            "model": "nova-2",
+            "language": "hi",
             "confidenceThreshold": 0.3,
         },
         "startSpeakingPlan": {
-            "waitSeconds": 0.4,
+            "waitSeconds": 0.15,
             "smartEndpointingEnabled": "livekit",
         },
         "model": {
@@ -559,6 +560,16 @@ async def dispatch_vapi_call(
     if assistant_id:
         overrides = {
             "firstMessage": first_message,
+            "transcriber": {
+                "provider": "deepgram",
+                "model": "nova-2",
+                "language": "hi",
+            },
+            "startSpeakingPlan": {
+                "waitSeconds": 0.15,
+                "smartEndpointingEnabled": "livekit",
+            },
+            "voice": voice_block,
             "variableValues": {
                 "customer_name": customer_name,
                 "business_name": business_name,
