@@ -5,11 +5,13 @@
 
 export function getApiBase(): string {
   const env = import.meta.env as Record<string, any>;
+  const isLocal = typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+  const defaultFallback = isLocal ? "http://localhost:8000" : "https://backend-production-4ba21.up.railway.app";
   const base =
     env["VITE_BACKEND_URL"] ||
     env["VITE_SCRAPER_API_BASE"] ||
     env["VITE_API_BASE_URL"] ||
-    "http://localhost:8000";
+    defaultFallback;
   return String(base).replace(/\/$/, "");
 }
 
