@@ -261,7 +261,7 @@ export function AnalyticsModule({
         efficiency: 85,
         health: "optimal",
         dropOff: "15%",
-        observation: "Google Meet invites and WhatsApp calendar links confirmed.",
+        observation: "Live Video meeting invites and WhatsApp calendar links confirmed.",
       },
       {
         stage: "6. Closed Commercial Deals",
@@ -289,7 +289,7 @@ export function AnalyticsModule({
       strengths: [
         "Proprietary AI tech stack with sub-800ms multilingual voice synthesis",
         "Direct verified contact discovery eliminating gatekeeper friction",
-        "Instant cross-channel automation (Voice + WhatsApp + Google Meet + HubSpot)",
+        "Instant cross-channel automation (Voice + WhatsApp + Live Video + HubSpot)",
         "Zero-tax communications mesh delivering rapid ROI for Indian SMBs & global enterprises",
       ],
       weaknesses: [
@@ -434,7 +434,7 @@ export function AnalyticsModule({
       {
         id: "rec-2",
         title: "Automate WhatsApp Zero-Tax Meeting Dispatches",
-        detail: "Send instant Google Meet links and call summaries to the prospect's mobile immediately after positive voice response.",
+        detail: "Send instant live video meeting links and call summaries to the prospect's mobile immediately after positive voice response.",
         priority: "high",
         effort: "low",
         expectedRoi: "92% demo attendance rate (vs 48% email-only)",
@@ -629,7 +629,7 @@ export function AnalyticsModule({
             {liveMetrics.meetingsCount}
           </div>
           <p className="font-mono text-[10px] text-muted-foreground">
-            Google Meet + WhatsApp
+            Live Video + WhatsApp
           </p>
           <span className="label-mono text-[9px] text-lime-700 dark:text-lime font-bold block">
             92% Attendance rate
@@ -1309,7 +1309,7 @@ export function AnalyticsModule({
                     <CheckCircle2 className="w-4 h-4 text-lime" />
                     <div>
                       <span className="font-bold text-ink block">WhatsApp Zero-Tax Gateway (Port 3001)</span>
-                      <span className="text-[10px] text-muted-foreground">Automated recaps, Google Meet dispatch</span>
+                      <span className="text-[10px] text-muted-foreground">Automated recaps, Live Video dispatch</span>
                     </div>
                   </div>
                   <span className="label-mono text-lime-700 dark:text-lime font-bold text-[10px]">READY</span>

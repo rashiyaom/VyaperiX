@@ -81,11 +81,11 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
   },
   {
     id: "video",
-    label: "Video Agent",
+    label: "Mitra AI Video",
     icon: Video,
     enabled: true,
-    badge: "Mitra",
-    description: "Autonomous AI video avatar sales agent powered by Tavus CVI for high-touch buyer meetings.",
+    badge: "Mitra AI",
+    description: "Autonomous AI video avatar sales agent powered by Mitra AI - Vyepari X for high-touch buyer meetings.",
     componentPath: "modules/video",
   },
   {
@@ -94,7 +94,7 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
     icon: CalendarIcon,
     enabled: true,
     badge: "Meetings",
-    description: "AI-scheduled meetings, Google Meet rooms, reminder alerts, and call follow-ups.",
+    description: "AI-scheduled meetings, live video rooms, reminder alerts, and call follow-ups.",
     componentPath: "modules/calendar",
   },
   {

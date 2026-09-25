@@ -646,19 +646,26 @@ async def create_report(
     linkedin_url: Optional[str] = Form(None),
     other_links: Optional[str] = Form(None),
     user_id: Optional[str] = Form(None),
+    user_email: Optional[str] = Form(None),
     authorization: Optional[str] = Header(None),
     files: List[UploadFile] = File(default=[]),
 ):
     resolved_user_id = None
+    resolved_user_email = None
     if authorization:
         try:
             auth_user = await auth_middleware.get_current_user(authorization)
-            if auth_user and auth_user.id:
-                resolved_user_id = auth_user.id
+            if auth_user:
+                if auth_user.id:
+                    resolved_user_id = auth_user.id
+                if auth_user.email:
+                    resolved_user_email = auth_user.email
         except Exception:
             pass
     if not resolved_user_id and user_id:
         resolved_user_id = user_id
+    if not resolved_user_email and user_email:
+        resolved_user_email = user_email
 
     clean_other_links: list[str] = []
     if other_links:
@@ -724,7 +731,8 @@ async def create_report(
         "linkedin": linkedin_url or "",
         "other": clean_other_links,
         "files": [fname for fname, _ in raw_files],
-    }, user_id=resolved_user_id)
+    }, user_id=resolved_user_id, user_email=resolved_user_email)
+
 
     background_tasks.add_task(
         run_pipeline,
@@ -779,21 +787,29 @@ async def chat_about_report(
 @app.get("/api/reports")
 async def list_reports(
     user_id: Optional[str] = Query(None),
+    user_email: Optional[str] = Query(None),
     authorization: Optional[str] = Header(None),
 ):
     resolved_user_id = None
+    resolved_user_email = None
     if authorization:
         try:
             auth_user = await auth_middleware.get_current_user(authorization)
-            if auth_user and auth_user.id:
-                resolved_user_id = auth_user.id
+            if auth_user:
+                if auth_user.id:
+                    resolved_user_id = auth_user.id
+                if auth_user.email:
+                    resolved_user_email = auth_user.email
         except Exception:
             pass
     if not resolved_user_id and user_id:
         resolved_user_id = user_id
-    if not resolved_user_id:
+    if not resolved_user_email and user_email:
+        resolved_user_email = user_email
+    if not resolved_user_id and not resolved_user_email:
         return []
-    return await db.list_reports(user_id=resolved_user_id, limit=50)
+    return await db.list_reports(user_id=resolved_user_id, user_email=resolved_user_email, limit=50)
+
 
 
 @app.get("/health")

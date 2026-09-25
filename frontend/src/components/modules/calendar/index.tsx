@@ -77,6 +77,30 @@ export interface CalendarEventRecord {
   approved_by?: string;
 }
 
+export interface MeetingLogRecord {
+  id: string;
+  meeting_id?: string;
+  user_id?: string;
+  user_email?: string;
+  customer_name: string;
+  customer_phone?: string;
+  customer_email?: string;
+  company_name?: string;
+  title: string;
+  start_time: string;
+  end_time: string;
+  meeting_type: string;
+  meet_url?: string;
+  calendly_link?: string;
+  approved_by?: string;
+  approved_at?: string;
+  status: string;
+  whatsapp_sent_at?: string;
+  email_sent_at?: string;
+  logged_at?: string;
+  notes?: string;
+}
+
 export interface CalendarModuleProps {
   user?: any;
   session?: any;
@@ -100,6 +124,13 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [typeFilter, setTypeFilter] = useState<string>("all");
+
+  // View Navigation: "calendar" or "accepted_logs"
+  const [activeTab, setActiveTab] = useState<"calendar" | "logs">("calendar");
+  const [meetingLogs, setMeetingLogs] = useState<MeetingLogRecord[]>([]);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [deletingLogId, setDeletingLogId] = useState<string | null>(null);
+  const [logSearchQuery, setLogSearchQuery] = useState("");
   
   // Modals & Selected Event
   const [selectedEvent, setSelectedEvent] = useState<CalendarEventRecord | null>(null);
@@ -120,13 +151,14 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
   const [formSendConfirmation, setFormSendConfirmation] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
-  // Fetch events
+  // Fetch events with user_id and user_email isolation
   const fetchEvents = async () => {
     try {
       setLoading(true);
       const headers = getAuthHeaders(session?.access_token);
       const userParam = user?.id ? `&user_id=${encodeURIComponent(user.id)}` : "";
-      const res = await fetch(`${API_BASE}/api/calendar/events?limit=200${userParam}`, { headers });
+      const emailParam = user?.email ? `&user_email=${encodeURIComponent(user.email)}` : "";
+      const res = await fetch(`${API_BASE}/api/calendar/events?limit=200${userParam}${emailParam}`, { headers });
       if (res.ok) {
         const data = await res.json();
         setEvents(Array.isArray(data.events) ? data.events : []);
@@ -138,9 +170,49 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
     }
   };
 
+  // Fetch dedicated accepted meeting logs from MongoDB
+  const fetchMeetingLogs = async () => {
+    try {
+      setLogsLoading(true);
+      const headers = getAuthHeaders(session?.access_token);
+      const userParam = user?.id ? `user_id=${encodeURIComponent(user.id)}` : "";
+      const emailParam = user?.email ? `&user_email=${encodeURIComponent(user.email)}` : "";
+      const res = await fetch(`${API_BASE}/api/calendar/meeting-logs?${userParam}${emailParam}`, { headers });
+      if (res.ok) {
+        const data = await res.json();
+        setMeetingLogs(Array.isArray(data.logs) ? data.logs : []);
+      }
+    } catch (e) {
+      console.error("Failed to load accepted meeting logs:", e);
+    } finally {
+      setLogsLoading(false);
+    }
+  };
+
+  const handleDeleteMeetingLog = async (logId: string) => {
+    if (!confirm("Are you sure you want to remove this accepted meeting log?")) return;
+    try {
+      setDeletingLogId(logId);
+      const headers = getAuthHeaders(session?.access_token);
+      const res = await fetch(`${API_BASE}/api/calendar/meeting-logs/${logId}`, {
+        method: "DELETE",
+        headers,
+      });
+      if (res.ok) {
+        setMeetingLogs((prev) => prev.filter((l) => l.id !== logId));
+        triggerSuccess("Meeting log entry removed.");
+      }
+    } catch (e) {
+      console.error("Failed to delete meeting log:", e);
+    } finally {
+      setDeletingLogId(null);
+    }
+  };
+
   useEffect(() => {
     fetchEvents();
-  }, [user?.id]);
+    fetchMeetingLogs();
+  }, [user?.id, user?.email]);
 
   // Temporary success banner
   const triggerSuccess = (msg: string) => {
@@ -197,6 +269,7 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
           : ` Meeting link dispatched.`;
         triggerSuccess(`✓ Booking confirmed & notifications dispatched to ${data.event?.customer_phone || "customer"}.${calendlyMsg}`);
         await fetchEvents();
+        fetchMeetingLogs();
         if (selectedEvent?.id === eventId) {
           setSelectedEvent(data.event || null);
         }
@@ -323,7 +396,7 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
         triggerSuccess(
           formSendConfirmation
             ? "✓ Meeting scheduled! Invitation email & live meeting link sent to registered email & client."
-            : "✓ Meeting scheduled with Google Meet & Reminders set!"
+            : "✓ Live Video Meeting scheduled & Reminders set!"
         );
       }
     } catch (err) {
@@ -479,6 +552,18 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
     return events.filter((e) => e.status === "new_booking");
   }, [events]);
 
+  const filteredMeetingLogs = useMemo(() => {
+    if (!logSearchQuery.trim()) return meetingLogs;
+    const q = logSearchQuery.toLowerCase();
+    return meetingLogs.filter((l) =>
+      (l.customer_name || "").toLowerCase().includes(q) ||
+      (l.company_name || "").toLowerCase().includes(q) ||
+      (l.customer_email || "").toLowerCase().includes(q) ||
+      (l.customer_phone || "").toLowerCase().includes(q) ||
+      (l.title || "").toLowerCase().includes(q)
+    );
+  }, [meetingLogs, logSearchQuery]);
+
   return (
     <div className="space-y-6">
       {/* Top Banner / Actions Notification */}
@@ -494,7 +579,56 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
         </div>
       )}
 
-      {/* ─────────────────── NEW BOOKINGS AWAITING CONFIRMATION QUEUE ─────────────────── */}
+      {/* Module View Mode Toggle: Interactive Calendar vs Dedicated Accepted Meeting Logs */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-ink/20 pb-4">
+        <div>
+          <h1 className="font-display text-xl sm:text-2xl font-black uppercase tracking-tight text-ink flex items-center gap-2.5">
+            <CalendarDays className="w-6 h-6 text-violet" />
+            <span>Calendar & Meeting Hub</span>
+          </h1>
+          <p className="text-xs font-mono text-muted-foreground mt-0.5">
+            Manage your schedule, automated bookings, and verified logs of accepted meetings.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2 bg-secondary p-1 border border-ink/20">
+          <button
+            type="button"
+            onClick={() => setActiveTab("calendar")}
+            className={`flex items-center gap-2 px-3.5 py-1.5 text-xs font-mono font-bold uppercase transition-all ${
+              activeTab === "calendar"
+                ? "bg-ink text-paper shadow-sm"
+                : "text-muted-foreground hover:text-ink"
+            }`}
+          >
+            <CalendarIcon className="w-3.5 h-3.5" />
+            <span>Schedule Calendar</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("logs")}
+            className={`flex items-center gap-2 px-3.5 py-1.5 text-xs font-mono font-bold uppercase transition-all ${
+              activeTab === "logs"
+                ? "bg-emerald-600 text-white shadow-sm"
+                : "text-muted-foreground hover:text-ink"
+            }`}
+          >
+            <CheckCircle2 className="w-3.5 h-3.5" />
+            <span>Accepted Meeting Logs</span>
+            {meetingLogs.length > 0 && (
+              <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${
+                activeTab === "logs" ? "bg-white text-emerald-800" : "bg-emerald-500/20 text-emerald-700 dark:text-emerald-400"
+              }`}>
+                {meetingLogs.length}
+              </span>
+            )}
+          </button>
+        </div>
+      </div>
+
+      {activeTab === "calendar" && (
+        <div className="space-y-6">
+          {/* ─────────────────── NEW BOOKINGS AWAITING CONFIRMATION QUEUE ─────────────────── */}
       {newBookings.length > 0 && (
         <div className="border-2 border-amber-500 bg-amber-500/5 dark:bg-amber-950/20 p-4 sm:p-5 transition-all">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3.5 pb-2.5 border-b border-amber-500/20">
@@ -655,10 +789,10 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
               {MONTH_NAMES[currentDate.getMonth()]} {currentDate.getFullYear()}
             </h2>
 
-            {/* Google Sync & Reminder Badge */}
+            {/* Sync & Reminder Badge */}
             <div className="flex items-center gap-1.5 px-2.5 py-1 border border-ink/20 bg-paper text-[11px] font-mono text-muted-foreground">
               <Bell className="w-3 h-3 text-violet" />
-              <span>Google Reminders Active</span>
+              <span>Reminders Active</span>
             </div>
           </div>
 
@@ -724,7 +858,7 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
               className="border border-ink/30 bg-paper px-2.5 py-1.5 font-mono text-xs text-ink focus:outline-none focus:border-violet"
             >
               <option value="all">All Meeting Types</option>
-              <option value="google_meet">Google Meet</option>
+              <option value="google_meet">Live Video Meeting</option>
               <option value="phone_call">Phone Call</option>
             </select>
 
@@ -1007,7 +1141,7 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
                         className="flex items-center gap-1.5 border border-violet bg-violet text-white px-3 py-1.5 label-mono text-xs font-bold hover:bg-violet/90 transition-all"
                       >
                         <Video className="w-3.5 h-3.5 text-lime" />
-                        <span>Join Google Meet</span>
+                        <span>Join Live Video</span>
                       </a>
                     )}
                     <button
@@ -1100,7 +1234,7 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
                                   : "border-lime bg-lime/10 text-lime-foreground"
                               }`}
                             >
-                              {isDone ? "✓ Completed" : isMeet ? "Google Meet" : "Phone Call"}
+                              {isDone ? "✓ Completed" : isMeet ? "Live Video" : "Phone Call"}
                             </span>
                             {ev.reminder_minutes > 0 && (
                               <span className="label-mono text-[9px] px-1.5 py-0.5 border border-amber-500/30 bg-amber-500/10 text-amber-600 flex items-center gap-1">
@@ -1165,6 +1299,217 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
           </div>
         </div>
       )}
+        </div>
+      )}
+
+      {/* ─────────────────── DEDICATED ACCEPTED MEETING LOGS VIEW ─────────────────── */}
+      {activeTab === "logs" && (
+        <div className="space-y-4">
+          {/* Top Control Toolbar */}
+          <div className="border border-ink bg-card p-4 sm:p-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h2 className="font-display text-lg sm:text-xl font-black uppercase tracking-tight text-ink flex items-center gap-2">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                  <span>Verified Accepted Meeting Logs</span>
+                </h2>
+                <p className="text-xs font-mono text-muted-foreground mt-0.5">
+                  Archived audit trail of confirmed bookings, approved slots, and dispatched meeting invites stored in MongoDB.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={fetchMeetingLogs}
+                  disabled={logsLoading}
+                  className="flex items-center gap-1.5 border border-ink/30 bg-paper px-3 py-1.5 label-mono text-xs font-bold text-ink hover:bg-secondary transition-all"
+                  title="Refresh logs from MongoDB"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${logsLoading ? "animate-spin text-violet" : ""}`} />
+                  <span>Refresh Logs</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Metrics cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4 pt-4 border-t border-ink/10">
+              <div className="border border-ink/20 bg-paper p-3 space-y-1">
+                <div className="label-mono text-[10px] text-muted-foreground uppercase">Total Accepted Meetings</div>
+                <div className="font-display text-2xl font-black text-ink">{meetingLogs.length}</div>
+              </div>
+              <div className="border border-ink/20 bg-paper p-3 space-y-1">
+                <div className="label-mono text-[10px] text-muted-foreground uppercase">WhatsApp Invites Dispatched</div>
+                <div className="font-display text-2xl font-black text-emerald-600 dark:text-emerald-400">
+                  {meetingLogs.filter((l) => l.whatsapp_sent_at).length}
+                </div>
+              </div>
+              <div className="border border-ink/20 bg-paper p-3 space-y-1">
+                <div className="label-mono text-[10px] text-muted-foreground uppercase">Live Video Rooms Ready</div>
+                <div className="font-display text-2xl font-black text-violet">
+                  {meetingLogs.filter((l) => l.meet_url).length}
+                </div>
+              </div>
+            </div>
+
+            {/* Search filter */}
+            <div className="mt-4 pt-4 border-t border-ink/10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div className="relative w-full sm:w-80">
+                <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  type="text"
+                  placeholder="Search by customer, company, or email..."
+                  value={logSearchQuery}
+                  onChange={(e) => setLogSearchQuery(e.target.value)}
+                  className="w-full border border-ink/30 bg-paper pl-8 pr-3 py-1.5 font-mono text-xs text-ink placeholder-muted-foreground focus:outline-none focus:border-violet transition-all"
+                />
+              </div>
+              <span className="text-[11px] font-mono text-muted-foreground shrink-0">
+                Showing {filteredMeetingLogs.length} of {meetingLogs.length} records
+              </span>
+            </div>
+          </div>
+
+          {/* Logs Table / Cards */}
+          {filteredMeetingLogs.length === 0 ? (
+            <div className="border border-ink/20 bg-card p-12 text-center space-y-3">
+              <CalendarDays className="w-12 h-12 text-muted-foreground/40 mx-auto" />
+              <h4 className="font-display text-base font-bold uppercase text-ink">No Accepted Meeting Logs Found</h4>
+              <p className="text-xs font-mono text-muted-foreground max-w-md mx-auto">
+                Whenever a meeting or voice-scheduled booking is accepted/confirmed by clicking "Confirm & Send" or approved via WhatsApp, its immutable record is automatically saved here in MongoDB.
+              </p>
+            </div>
+          ) : (
+            <div className="border border-ink bg-card overflow-x-auto shadow-sm">
+              <table className="w-full text-left border-collapse text-xs font-mono">
+                <thead>
+                  <tr className="border-b border-ink/20 bg-secondary/80 text-[10px] uppercase font-bold text-muted-foreground tracking-wider">
+                    <th className="py-3 px-4">Customer & Company</th>
+                    <th className="py-3 px-3">Meeting Details</th>
+                    <th className="py-3 px-3">Confirmed Timeslot</th>
+                    <th className="py-3 px-3">Live Video Room</th>
+                    <th className="py-3 px-3">Calendly</th>
+                    <th className="py-3 px-3">Dispatched Alerts</th>
+                    <th className="py-3 px-3">Approved By / At</th>
+                    <th className="py-3 px-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-ink/10">
+                  {filteredMeetingLogs.map((log) => (
+                    <tr key={log.id} className="hover:bg-secondary/40 transition-colors">
+                      <td className="py-3 px-4 space-y-1">
+                        <div className="font-bold text-ink flex items-center gap-1.5">
+                          <User className="w-3.5 h-3.5 text-violet shrink-0" />
+                          <span>{log.customer_name}</span>
+                        </div>
+                        {log.company_name && (
+                          <div className="text-[11px] text-muted-foreground flex items-center gap-1">
+                            <Building className="w-3 h-3 shrink-0" />
+                            <span>{log.company_name}</span>
+                          </div>
+                        )}
+                        <div className="text-[10px] text-muted-foreground">
+                          {log.customer_email && <div>{log.customer_email}</div>}
+                          {log.customer_phone && <div className="text-ink font-semibold">{log.customer_phone}</div>}
+                        </div>
+                      </td>
+
+                      <td className="py-3 px-3 space-y-1">
+                        <div className="font-bold text-ink">{log.title}</div>
+                        <span className="inline-block px-1.5 py-0.5 text-[9px] uppercase font-bold border border-ink/20 bg-paper text-muted-foreground">
+                          {log.meeting_type?.replace("_", " ") || "Live Video"}
+                        </span>
+                      </td>
+
+                      <td className="py-3 px-3 space-y-0.5">
+                        <div className="text-ink font-semibold flex items-center gap-1">
+                          <Clock className="w-3 h-3 text-muted-foreground shrink-0" />
+                          <span>{new Date(log.start_time).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })}</span>
+                        </div>
+                        <div className="text-[10px] text-muted-foreground">
+                          {formatTimeRange(log.start_time, log.end_time)}
+                        </div>
+                      </td>
+
+                      <td className="py-3 px-3">
+                        {log.meet_url ? (
+                          <a
+                            href={log.meet_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold border border-violet bg-violet/10 text-violet hover:bg-violet hover:text-white transition-all shadow-xs"
+                          >
+                            <Video className="w-3 h-3" />
+                            <span>Join Video</span>
+                            <ExternalLink className="w-2.5 h-2.5" />
+                          </a>
+                        ) : (
+                          <span className="text-muted-foreground text-[10px] italic">No room assigned</span>
+                        )}
+                      </td>
+
+                      <td className="py-3 px-3">
+                        {log.calendly_link ? (
+                          <a
+                            href={log.calendly_link}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-[11px] text-emerald-700 dark:text-emerald-400 hover:underline"
+                          >
+                            <Link2 className="w-3 h-3" />
+                            <span>Calendly Link</span>
+                            <ExternalLink className="w-2 h-2" />
+                          </a>
+                        ) : (
+                          <span className="text-muted-foreground text-[10px]">—</span>
+                        )}
+                      </td>
+
+                      <td className="py-3 px-3 space-y-1">
+                        {log.whatsapp_sent_at ? (
+                          <div className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30">
+                            <Check className="w-2.5 h-2.5" />
+                            <span>WhatsApp Sent</span>
+                          </div>
+                        ) : (
+                          <div className="text-[10px] text-muted-foreground">WhatsApp: Pending</div>
+                        )}
+                        {log.email_sent_at && (
+                          <div className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold bg-violet/15 text-violet border border-violet/30">
+                            <Mail className="w-2.5 h-2.5" />
+                            <span>Email Sent</span>
+                          </div>
+                        )}
+                      </td>
+
+                      <td className="py-3 px-3 text-[10px] text-muted-foreground space-y-0.5">
+                        <div className="text-ink font-bold">{log.approved_by || "Sales Agent"}</div>
+                        <div>
+                          {log.approved_at
+                            ? new Date(log.approved_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
+                            : "Confirmed"}
+                        </div>
+                      </td>
+
+                      <td className="py-3 px-3 text-right">
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteMeetingLog(log.id)}
+                          disabled={deletingLogId === log.id}
+                          className="p-1.5 text-muted-foreground hover:text-red-600 hover:bg-destructive/10 transition-colors"
+                          title="Delete meeting log entry"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ─────────────────── EVENT DETAIL MODAL ─────────────────── */}
       {selectedEvent && (
@@ -1180,7 +1525,7 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
             {/* Header */}
             <div>
               <span className="label-mono text-violet text-[10px] uppercase tracking-wider">
-                {selectedEvent.meeting_type === "google_meet" ? "Google Meet Video Call" : "Scheduled Phone Call"}
+                {selectedEvent.meeting_type === "google_meet" || selectedEvent.meeting_type === "live_video" ? "Live Video Meeting" : "Scheduled Phone Call"}
               </span>
               <h3 className="font-display text-lg sm:text-xl font-extrabold uppercase tracking-tight mt-1 text-ink">
                 {selectedEvent.title}
@@ -1229,7 +1574,7 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
               </div>
               <div className="p-3 flex items-center justify-between">
                 <span className="text-muted-foreground flex items-center gap-1.5">
-                  <Bell className="w-3.5 h-3.5 text-amber-500" /> Google Reminder
+                  <Bell className="w-3.5 h-3.5 text-amber-500" /> Smart Reminder
                 </span>
                 <span className="text-amber-600 font-bold">
                   {selectedEvent.reminder_minutes} minutes before
@@ -1416,7 +1761,7 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
             </button>
 
             <div>
-              <span className="label-mono text-violet text-[10px] uppercase">Google Calendar Integration</span>
+              <span className="label-mono text-violet text-[10px] uppercase">VyaperiX Live Video & Calendar</span>
               <h3 className="font-display text-lg sm:text-xl font-extrabold uppercase tracking-tight text-ink mt-0.5">
                 Schedule Meeting or Call
               </h3>
@@ -1514,12 +1859,12 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
                     onChange={(e) => setFormType(e.target.value as any)}
                     className="w-full border border-ink/30 bg-paper px-2 py-2 text-ink focus:outline-none focus:border-violet"
                   >
-                    <option value="google_meet">Google Meet (Auto-generate)</option>
+                    <option value="google_meet">Live Video Meeting (Auto-generate)</option>
                     <option value="phone_call">Phone Call Follow-up</option>
                   </select>
                 </div>
                 <div>
-                  <label className="label-mono text-muted-foreground block mb-1">Google Reminder</label>
+                  <label className="label-mono text-muted-foreground block mb-1">Smart Reminder</label>
                   <select
                     value={formReminder}
                     onChange={(e) => setFormReminder(Number(e.target.value))}

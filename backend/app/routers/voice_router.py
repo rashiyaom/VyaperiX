@@ -39,6 +39,7 @@ class CallRequest(BaseModel):
     force_simulate: Optional[bool] = False
     language: Optional[str] = "auto"
     user_id: Optional[str] = None
+    user_email: Optional[str] = None
     extra_context: Optional[dict] = None
 
 
@@ -47,6 +48,7 @@ class BatchCallRequest(BaseModel):
     calls: List[CallRequest] = Field(..., min_length=1)
     force_simulate: Optional[bool] = False
     user_id: Optional[str] = None
+    user_email: Optional[str] = None
 
 
 class InboundSimRequest(BaseModel):
@@ -54,6 +56,8 @@ class InboundSimRequest(BaseModel):
     customer_phone: str = "+91 98200 12345"
     business_name: str = "Vyepari CRM"
     caller_inquiry: str = "Pricing inquiry for 25 sales seats and enterprise API integration"
+    user_id: Optional[str] = None
+    user_email: Optional[str] = None
 
 
 class DirectOutboundCallRequest(BaseModel):
@@ -64,6 +68,7 @@ class DirectOutboundCallRequest(BaseModel):
     call_reason: Optional[str] = "Outbound Consultation"
     extra_context: Optional[dict] = None
     user_id: Optional[str] = None
+    user_email: Optional[str] = None
 
 
 class VoiceSettingsPayload(BaseModel):
@@ -107,11 +112,15 @@ async def create_single_call(
     Supports live Vapi/Twilio dispatch with automatic fallback to high-fidelity simulation.
     """
     resolved_user_id = payload.user_id
-    if (not resolved_user_id or str(resolved_user_id).lower() in ("undefined", "null", "")) and authorization:
+    resolved_user_email = payload.user_email
+    if authorization:
         try:
             auth_user = await auth_middleware.get_current_user(authorization)
             if auth_user:
-                resolved_user_id = auth_user.id
+                if not resolved_user_id or str(resolved_user_id).lower() in ("undefined", "null", ""):
+                    resolved_user_id = auth_user.id
+                if not resolved_user_email:
+                    resolved_user_email = auth_user.email
         except Exception:
             pass
 
@@ -142,7 +151,7 @@ async def create_single_call(
         "analysis": None,
     }
 
-    await db.create_voice_call(call_data, user_id=resolved_user_id)
+    await db.create_voice_call(call_data, user_id=resolved_user_id, user_email=resolved_user_email)
 
     if payload.force_simulate:
         background_tasks.add_task(
@@ -209,7 +218,7 @@ async def direct_outbound_call(payload: DirectOutboundCallRequest):
         "transcript": [],
         "analysis": None,
     }
-    await db.create_voice_call(call_data, user_id=payload.user_id)
+    await db.create_voice_call(call_data, user_id=payload.user_id, user_email=payload.user_email)
 
     dispatch_res = await voice_engine.dispatch_outbound_call(
         call_id=call_id,
@@ -242,7 +251,7 @@ async def create_batch_calls(payload: BatchCallRequest, background_tasks: Backgr
     campaign_id = str(uuid.uuid4())
     created_call_ids = []
 
-    async def _process_batch(items: List[CallRequest], camp_id: str, force_sim: bool, fallback_user_id: Optional[str] = None):
+    async def _process_batch(items: List[CallRequest], camp_id: str, force_sim: bool, fallback_user_id: Optional[str] = None, fallback_user_email: Optional[str] = None):
         for item in items:
             # Skip any blacklisted numbers in campaign dialer
             is_blocked, _ = await db.is_number_blocked(item.customer_phone)
@@ -264,10 +273,16 @@ async def create_batch_calls(payload: BatchCallRequest, background_tasks: Backgr
                 "transcript": [],
                 "analysis": None,
             }
-            await db.create_voice_call(call_data, user_id=item.user_id or fallback_user_id)
+            await db.create_voice_call(
+                call_data,
+                user_id=item.user_id or fallback_user_id,
+                user_email=item.user_email or fallback_user_email,
+            )
             created_call_ids.append(c_id)
 
             if force_sim:
+                await voice_engine.simulate_call_lifecycle,
+                # ...
                 await voice_engine.simulate_call_lifecycle(
                     call_id=c_id,
                     customer_name=item.customer_name,
@@ -297,6 +312,7 @@ async def create_batch_calls(payload: BatchCallRequest, background_tasks: Backgr
         campaign_id,
         payload.force_simulate or False,
         payload.user_id,
+        payload.user_email,
     )
 
     return {
@@ -311,6 +327,7 @@ async def create_batch_calls(payload: BatchCallRequest, background_tasks: Backgr
 @router.get("/calls")
 async def list_calls(
     user_id: Optional[str] = Query(None),
+    user_email: Optional[str] = Query(None),
     direction: Optional[str] = Query(None, description="outbound | inbound | all"),
     status: Optional[str] = Query(None, description="queued | in-progress | completed | failed | all"),
     campaign_id: Optional[str] = Query(None),
@@ -320,16 +337,21 @@ async def list_calls(
 ):
     """List call history with optional filters and search."""
     resolved_user_id = user_id
-    if (not resolved_user_id or str(resolved_user_id).lower() in ("undefined", "null", "")) and authorization:
+    resolved_user_email = user_email
+    if authorization:
         try:
             auth_user = await auth_middleware.get_current_user(authorization)
             if auth_user:
-                resolved_user_id = auth_user.id
+                if not resolved_user_id or str(resolved_user_id).lower() in ("undefined", "null", ""):
+                    resolved_user_id = auth_user.id
+                if not resolved_user_email:
+                    resolved_user_email = auth_user.email
         except Exception:
             pass
 
     calls = await db.list_voice_calls(
         user_id=resolved_user_id,
+        user_email=resolved_user_email,
         direction=direction,
         status=status,
         campaign_id=campaign_id,
@@ -449,6 +471,8 @@ async def simulate_inbound_call(payload: InboundSimRequest, background_tasks: Ba
         "duration_seconds": 0,
         "transcript": [],
         "analysis": None,
+        "user_id": payload.user_id,
+        "user_email": payload.user_email.strip().lower() if payload.user_email else None,
     }
     await db.create_voice_call(call_data)
 
@@ -656,18 +680,23 @@ async def sarvam_webhook(request: Request):
 @router.get("/stats")
 async def get_stats(
     user_id: Optional[str] = Query(None),
+    user_email: Optional[str] = Query(None),
     authorization: Optional[str] = Header(None),
 ):
     """Retrieve aggregate statistics for dashboard metric cards."""
     resolved_user_id = user_id
-    if (not resolved_user_id or str(resolved_user_id).lower() in ("undefined", "null", "")) and authorization:
+    resolved_user_email = user_email
+    if authorization:
         try:
             auth_user = await auth_middleware.get_current_user(authorization)
             if auth_user:
-                resolved_user_id = auth_user.id
+                if not resolved_user_id or str(resolved_user_id).lower() in ("undefined", "null", ""):
+                    resolved_user_id = auth_user.id
+                if not resolved_user_email:
+                    resolved_user_email = auth_user.email
         except Exception:
             pass
-    return await db.get_voice_stats(user_id=resolved_user_id)
+    return await db.get_voice_stats(user_id=resolved_user_id, user_email=resolved_user_email)
 
 
 @router.get("/config")

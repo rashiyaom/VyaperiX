@@ -327,7 +327,7 @@ export function VideoMeetingModule({
         const errorMsg =
           data.detail ||
           data.message ||
-          "Failed to start video meeting. Please check server configuration or Tavus API credentials.";
+          "Failed to start video meeting. Please check server configuration or Mitra AI credentials.";
         setStartError(errorMsg);
         setStartingMeeting(false);
         return;
@@ -400,17 +400,17 @@ export function VideoMeetingModule({
         <div>
           <div className="flex items-center gap-2 mb-1">
             <span className="inline-flex items-center gap-1.5 border border-violet/40 bg-violet/10 text-violet px-2 py-0.5 label-mono text-[10px] font-bold">
-              <Video className="w-3.5 h-3.5" /> TAVUS CVI v2
+              <Video className="w-3.5 h-3.5" /> MITRA AI - VYEPARI X
             </span>
             <span className="label-mono text-muted-foreground text-[10px]">
               AI VIDEO SALES AVATAR · MITRA
             </span>
           </div>
           <h2 className="font-display text-2xl font-bold uppercase tracking-tight text-ink">
-            Video Sales Agent
+            Mitra AI - Vyepari X Video Sales Agent
           </h2>
           <p className="font-mono text-xs text-muted-foreground mt-0.5">
-            Real-time interactive buyer discovery meetings powered by Tavus avatar intelligence and Groq analysis.
+            Real-time interactive buyer discovery meetings powered by Mitra AI - Vyepari X avatar intelligence and Groq analysis.
           </p>
         </div>
 
@@ -508,7 +508,7 @@ export function VideoMeetingModule({
                   src={activeMeeting.conversation_url}
                   allow="camera; microphone; display-capture; autoplay; encrypted-media"
                   className="w-full h-full border-0"
-                  title="Tavus AI Video Sales Meeting Room"
+                  title="Mitra AI - Vyepari X Video Sales Meeting Room"
                 />
               </div>
             </div>
@@ -864,7 +864,7 @@ export function VideoMeetingModule({
               <div className="space-y-1">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="inline-flex items-center gap-1 border border-violet/40 bg-violet/10 text-violet px-2 py-0.5 text-[9px] font-bold label-mono">
-                    <Video className="w-3 h-3" /> TAVUS AVATAR (MITRA)
+                    <Video className="w-3 h-3" /> MITRA AI - VYEPARI X
                   </span>
                   {selectedMeeting.status === "analyzing" ? (
                     <span className="border border-violet/50 bg-violet/10 text-violet px-2 py-0.5 text-[9px] font-bold label-mono animate-pulse">
@@ -893,10 +893,10 @@ export function VideoMeetingModule({
                   onClick={() => handleSyncMeeting(selectedMeeting.id)}
                   disabled={syncingMeeting}
                   className="border border-ink/20 bg-paper hover:border-violet hover:text-violet px-3 py-1.5 font-mono text-xs font-bold text-ink transition-all flex items-center gap-1.5 shadow-sm disabled:opacity-50"
-                  title="Fetch latest transcript turns and AI review from Tavus"
+                  title="Fetch latest transcript turns and AI review from Mitra AI"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${syncingMeeting ? "animate-spin text-violet" : ""}`} />
-                  {syncingMeeting ? "Syncing..." : "Sync with Tavus"}
+                  {syncingMeeting ? "Syncing..." : "Sync Meeting Intelligence"}
                 </button>
                 <button
                   type="button"
@@ -962,7 +962,7 @@ export function VideoMeetingModule({
 
                   {(!selectedMeeting.transcript || selectedMeeting.transcript.length === 0) ? (
                     <div className="border border-ink/15 bg-secondary/10 p-6 text-center text-muted-foreground">
-                      No transcript turns recorded yet. Transcript will be populated once processed by Tavus transcription.
+                      No transcript turns recorded yet. Transcript will be populated once processed by Mitra AI transcription.
                     </div>
                   ) : (
                     <div className="space-y-3">
@@ -979,7 +979,7 @@ export function VideoMeetingModule({
                             <span className="font-bold flex items-center gap-1.5">
                               {turn.speaker === "agent" ? (
                                 <>
-                                  <Bot className="w-3.5 h-3.5 text-violet" /> Mitra AI Video Avatar (Tavus PAL)
+                                  <Bot className="w-3.5 h-3.5 text-violet" /> Mitra AI - Vyepari X Video Avatar
                                 </>
                               ) : (
                                 <>
@@ -1145,7 +1145,7 @@ export function VideoMeetingModule({
                               Video Call Recording
                             </span>
                             <span className="font-mono text-xs text-ink font-bold">
-                              Archived in Tavus Cloud Storage
+                              Archived in Mitra AI - Vyepari X Cloud
                             </span>
                           </div>
                           <a

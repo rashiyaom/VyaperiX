@@ -168,6 +168,15 @@ function OnboardingPage() {
       "vyaperi_onboarding",
       JSON.stringify({ company, industry, teamSize, useCase, source })
     );
+    if (user?.id) {
+      try {
+        localStorage.setItem(
+          `vyaperi_onboarding_${user.id}`,
+          JSON.stringify({ company, industry, teamSize, useCase, source })
+        );
+      } catch {}
+    }
+
     try {
       if (user) {
         await completeOnboarding();

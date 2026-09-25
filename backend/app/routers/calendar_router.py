@@ -47,6 +47,7 @@ class CreateCalendarEventRequest(BaseModel):
     remind_via: Optional[str] = Field("popup", description="'popup' | 'email' | 'both'")
     call_id: Optional[str] = None
     user_id: Optional[str] = None
+    user_email: Optional[str] = None
     sync_to_google: Optional[bool] = False
     google_access_token: Optional[str] = None
     send_customer_confirmation: Optional[bool] = False
@@ -113,7 +114,8 @@ async def _sms_alerts_enabled(user_id: Optional[str]) -> bool:
 @router.get("/events")
 async def list_events(
     user_id: Optional[str] = Query(None, description="Filter by user UUID"),
-    status: Optional[str] = Query(None, description="'scheduled' | 'completed' | 'cancelled'"),
+    user_email: Optional[str] = Query(None, description="Filter by user email"),
+    status: Optional[str] = Query(None, description="'scheduled' | 'completed' | 'cancelled' | 'confirmed'"),
     start_date: Optional[str] = Query(None, description="ISO-8601 start lower bound"),
     end_date: Optional[str] = Query(None, description="ISO-8601 end upper bound"),
     customer_name: Optional[str] = Query(None, description="Filter/search by customer name"),
@@ -125,16 +127,21 @@ async def list_events(
     Supports filtering by customer name, status, and date range.
     """
     resolved_user_id = user_id
-    if (not resolved_user_id or str(resolved_user_id).lower() in ("undefined", "null", "")) and authorization:
+    resolved_user_email = user_email
+    if authorization:
         try:
             auth_user = await auth_middleware.get_current_user(authorization)
-            if auth_user and auth_user.id:
-                resolved_user_id = auth_user.id
+            if auth_user:
+                if not resolved_user_id or str(resolved_user_id).lower() in ("undefined", "null", ""):
+                    resolved_user_id = auth_user.id
+                if not resolved_user_email:
+                    resolved_user_email = auth_user.email
         except Exception:
             pass
 
     events = await db.list_calendar_events(
         user_id=resolved_user_id,
+        user_email=resolved_user_email,
         status=status,
         start_date=start_date,
         end_date=end_date,
@@ -175,13 +182,17 @@ async def create_event(
         "status": "scheduled",
     }
 
-    # Extract user_id if token provided
+    # Extract user_id and email if token provided
     resolved_user_id = payload.user_id
-    if (not resolved_user_id or str(resolved_user_id).lower() in ("undefined", "null", "")) and authorization:
+    resolved_user_email = payload.user_email
+    if authorization:
         try:
             auth_user = await auth_middleware.get_current_user(authorization)
-            if auth_user and auth_user.id:
-                resolved_user_id = auth_user.id
+            if auth_user:
+                if not resolved_user_id or str(resolved_user_id).lower() in ("undefined", "null", ""):
+                    resolved_user_id = auth_user.id
+                if not resolved_user_email:
+                    resolved_user_email = auth_user.email
         except Exception:
             pass
 
@@ -196,7 +207,7 @@ async def create_event(
             event_data["google_event_id"] = sync_res["google_event_id"]
             event_data["synced_to_google"] = True
 
-    event_id = await db.create_calendar_event(event_data, user_id=resolved_user_id)
+    event_id = await db.create_calendar_event(event_data, user_id=resolved_user_id, user_email=resolved_user_email)
     event_data["id"] = event_id
 
     # SMS notification right after save succeeds
@@ -298,6 +309,36 @@ async def update_event(event_id: str, payload: UpdateCalendarEventRequest):
 
     updates = {k: v for k, v in payload.model_dump().items() if v is not None}
     updated = await db.update_calendar_event(event_id, updates)
+
+    if updates.get("status") in ("confirmed", "completed"):
+        try:
+            await db.create_meeting_log(
+                {
+                    "event_id": event_id,
+                    "call_id": event.get("call_id"),
+                    "customer_name": event.get("customer_name"),
+                    "customer_phone": event.get("customer_phone"),
+                    "customer_email": event.get("customer_email"),
+                    "company_name": event.get("company_name"),
+                    "title": updates.get("title") or event.get("title"),
+                    "description": updates.get("description") or event.get("description"),
+                    "start_time": updates.get("start_time") or event.get("start_time"),
+                    "end_time": updates.get("end_time") or event.get("end_time"),
+                    "meet_url": updates.get("meet_url") or event.get("meet_url"),
+                    "calendly_link": updates.get("calendly_link") or event.get("calendly_link"),
+                    "status": "accepted",
+                    "approval_status": "accepted",
+                    "approved_at": datetime.now(timezone.utc).isoformat(),
+                    "approved_by": "user",
+                    "whatsapp_status": event.get("whatsapp_status", "pending"),
+                    "email_status": event.get("email_status", "pending"),
+                },
+                user_id=event.get("user_id"),
+                user_email=event.get("user_email") or event.get("email_owner"),
+            )
+        except Exception as log_err:
+            logger.warning(f"Could not record meeting log on update_event: {log_err}")
+
     return {"message": "Event updated successfully", "event": updated}
 
 
@@ -690,6 +731,41 @@ async def approve_and_send_whatsapp(
 
     updated_event = await db.update_calendar_event(event_id, updates)
 
+    # Save dedicated Accepted Meeting Log in MongoDB
+    try:
+        await db.create_meeting_log(
+            {
+                "event_id": event_id,
+                "call_id": event.get("call_id"),
+                "customer_name": event.get("customer_name") or "Valued Partner",
+                "customer_phone": target_phone,
+                "customer_email": updates.get("customer_email") or event.get("customer_email"),
+                "company_name": event.get("company_name") or "",
+                "title": event.get("title") or "Confirmed Meeting",
+                "description": event.get("description") or "",
+                "agenda": agenda_to_send,
+                "notes": requirements_to_send,
+                "start_time": start_time_to_send,
+                "end_time": updates.get("end_time") or event.get("end_time"),
+                "meet_url": meet_url,
+                "calendly_link": calendly_link,
+                "calendly_booked": updates.get("calendly_booked", False),
+                "status": "accepted",
+                "approval_status": "accepted",
+                "approved_at": updates.get("approved_at"),
+                "approved_by": "sales_agent",
+                "whatsapp_status": updates.get("whatsapp_status", "sent"),
+                "whatsapp_sent_at": updates.get("whatsapp_sent_at"),
+                "email_status": updates.get("email_status", "sent"),
+                "email_sent_at": updates.get("email_sent_at"),
+                "channels_notified": ["whatsapp", "email", "sms"],
+            },
+            user_id=event.get("user_id"),
+            user_email=event.get("user_email") or event.get("email_owner"),
+        )
+    except Exception as log_err:
+        logger.warning(f"Could not record dedicated meeting log: {log_err}")
+
     return {
         "success": True,
         "message": "✓ Booking confirmed! Calendly self-booking link dispatched via WhatsApp & SMS.",
@@ -698,3 +774,40 @@ async def approve_and_send_whatsapp(
         "meet_url": meet_url,
         "calendly_link": calendly_link,
     }
+
+
+# ─────────────────────────── Accepted Meeting Logs Endpoints ───────────
+
+@router.get("/meeting-logs")
+async def list_accepted_meeting_logs(
+    user_id: Optional[str] = Query(None, description="Filter by user UUID"),
+    user_email: Optional[str] = Query(None, description="Filter by user email"),
+    limit: int = Query(100, ge=1, le=500),
+    authorization: Optional[str] = Header(None),
+):
+    """
+    List all accepted & confirmed meetings from the dedicated MongoDB meeting_logs collection.
+    Preserves historical confirmation audit logs completely isolated from the standard schedule.
+    """
+    resolved_user_id = user_id
+    resolved_user_email = user_email
+    if authorization:
+        try:
+            auth_user = await auth_middleware.get_current_user(authorization)
+            if auth_user:
+                if not resolved_user_id or str(resolved_user_id).lower() in ("undefined", "null", ""):
+                    resolved_user_id = auth_user.id
+                if not resolved_user_email:
+                    resolved_user_email = auth_user.email
+        except Exception:
+            pass
+
+    logs = await db.list_meeting_logs(user_id=resolved_user_id, user_email=resolved_user_email, limit=limit)
+    return {"meeting_logs": logs, "count": len(logs)}
+
+
+@router.delete("/meeting-logs/{log_id}")
+async def delete_meeting_log_entry(log_id: str):
+    """Delete or archive an accepted meeting log."""
+    deleted = await db.delete_meeting_log(log_id)
+    return {"success": deleted, "deleted_id": log_id}

@@ -390,25 +390,38 @@ export function VoiceFleetModule({
 
   // Load Calls & Stats
   const userId = user?.id;
+  const userEmail = user?.email;
 
   const fetchCallsAndStats = async () => {
     try {
       setLoadingCalls(true);
       const validUserId = user?.id && user.id !== "undefined" && user.id !== "null" ? user.id : null;
-      const userParam = validUserId ? `&user_id=${encodeURIComponent(validUserId)}` : "";
-      const statsUserParam = validUserId ? `?user_id=${encodeURIComponent(validUserId)}` : "";
-      const headers: Record<string, string> = {};
-      if (session?.access_token) {
-        headers["Authorization"] = `Bearer ${session.access_token}`;
-      }
+      const validUserEmail = user?.email && user.email.includes("@") ? user.email : null;
+
+      const params = new URLSearchParams();
+      params.append("limit", "100");
+      if (validUserId) params.append("user_id", validUserId);
+      if (validUserEmail) params.append("user_email", validUserEmail);
+
+      const statsParams = new URLSearchParams();
+      if (validUserId) statsParams.append("user_id", validUserId);
+      if (validUserEmail) statsParams.append("user_email", validUserEmail);
+
+      const headers = getAuthHeaders();
       const [callsRes, statsRes] = await Promise.all([
-        fetch(`${API_BASE}/api/voice/calls?limit=100${userParam}`, { headers }),
-        fetch(`${API_BASE}/api/voice/stats${statsUserParam}`, { headers }),
+        fetch(`${API_BASE}/api/voice/calls?${params.toString()}`, { headers }),
+        fetch(`${API_BASE}/api/voice/stats?${statsParams.toString()}`, { headers }),
       ]);
 
       if (callsRes.ok) {
         const callsData = await callsRes.json();
-        setCalls(Array.isArray(callsData) ? callsData : []);
+        if (Array.isArray(callsData)) {
+          setCalls(callsData);
+          const cacheKey = validUserId ? `vyaperi_voice_calls_${validUserId}` : "vyaperi_voice_calls_default";
+          try {
+            localStorage.setItem(cacheKey, JSON.stringify(callsData));
+          } catch (e) {}
+        }
       }
       if (statsRes.ok) {
         const statsData = await statsRes.json();
@@ -422,12 +435,24 @@ export function VoiceFleetModule({
   };
 
   useEffect(() => {
+    // Initial local cache hydration
+    const cacheKey = userId ? `vyaperi_voice_calls_${userId}` : "vyaperi_voice_calls_default";
+    try {
+      const cached = localStorage.getItem(cacheKey);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setCalls(parsed);
+        }
+      }
+    } catch (e) {}
+
     fetchCallsAndStats();
     const interval = setInterval(() => {
       fetchCallsAndStats();
     }, 8000);
     return () => clearInterval(interval);
-  }, [userId]);
+  }, [userId, userEmail]);
 
   // Update business name if companyName changes
   useEffect(() => {
@@ -678,6 +703,7 @@ export function VoiceFleetModule({
       const payload = {
         campaign_name: csvFile ? csvFile.name.replace(".csv", "") : "CSV Outreach Fleet",
         user_id: user?.id,
+        user_email: user?.email,
         calls: selected.map((c) => ({
           customer_name: c.customer_name,
           customer_phone: c.customer_phone,
@@ -685,6 +711,7 @@ export function VoiceFleetModule({
           call_reason: c.call_reason,
           direction: "outbound",
           user_id: user?.id,
+          user_email: user?.email,
           extra_context: extraContext,
         })),
         force_simulate: false,
@@ -731,6 +758,7 @@ export function VoiceFleetModule({
           direction: "outbound",
           force_simulate: false,
           user_id: user?.id,
+          user_email: user?.email,
           extra_context: extraContext,
         }),
       });
@@ -867,6 +895,7 @@ export function VoiceFleetModule({
           force_simulate: !isRealCall,
           language: liveCallLanguage,
           user_id: user?.id,
+          user_email: user?.email,
           extra_context: extraContext,
         }),
       });
@@ -974,6 +1003,7 @@ export function VoiceFleetModule({
           business_name: bizName,
           caller_inquiry: callerInquiry,
           user_id: user?.id,
+          user_email: user?.email,
         }),
       });
       if (res.ok) {

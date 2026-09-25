@@ -46,7 +46,7 @@ export function WhatsAppModule({ companyName = "VyaperiX" }: WhatsAppModuleProps
   const [msgType, setMsgType] = useState<"meeting" | "requirements" | "custom">("meeting");
   const [customerName, setCustomerName] = useState("Rajesh Sharma");
   const [agenda, setAgenda] = useState("Autonomous Voice SDR & WhatsApp Gateway Demo");
-  const [requirements, setRequirements] = useState("1. Multilingual Indic voice bots\n2. Real-time Google Meet booking\n3. Zero-GST WhatsApp Business messaging");
+  const [requirements, setRequirements] = useState("1. Multilingual Indic voice bots\n2. Real-time Live Video Meeting booking\n3. Zero-GST WhatsApp Business messaging");
   const [customText, setCustomText] = useState("Hello from VyaperiX! Your AI sales agent is active.");
 
   // Automation Settings State
@@ -204,7 +204,7 @@ export function WhatsAppModule({ companyName = "VyaperiX" }: WhatsAppModuleProps
             WhatsApp Business Gateway
           </h2>
           <p className="font-mono text-xs text-muted-foreground">
-            Direct-to-client automated messaging for <span className="text-ink font-bold">{companyName}</span> phone calls, Google Meet invites & discovery recaps.
+            Direct-to-client automated messaging for <span className="text-ink font-bold">{companyName}</span> phone calls, Live Video invites & discovery recaps.
           </p>
         </div>
 
@@ -271,7 +271,7 @@ export function WhatsAppModule({ companyName = "VyaperiX" }: WhatsAppModuleProps
 
         <p className="font-mono text-xs text-muted-foreground leading-relaxed">
           {isConnected
-            ? `Your WhatsApp device (+${statusData?.phone_number}) is authenticated over Baileys WebSocket protocol. Automated call transcripts, Google Meet links, and customer requirement recaps will be sent directly from your number without Meta API rate limits or GST paperwork.`
+            ? `Your WhatsApp device (+${statusData?.phone_number}) is authenticated over Baileys WebSocket protocol. Automated call transcripts, Live Video meeting links, and customer requirement recaps will be sent directly from your number without Meta API rate limits or GST paperwork.`
             : "No active WhatsApp session detected. Scan the QR code below from your phone's WhatsApp Linked Devices to enable post-call automated messaging."}
         </p>
       </div>
@@ -380,8 +380,8 @@ export function WhatsAppModule({ companyName = "VyaperiX" }: WhatsAppModuleProps
                 
                 <label className="flex items-center justify-between border border-ink/10 p-2.5 cursor-pointer hover:bg-secondary/40 transition-colors">
                   <div className="space-y-0.5">
-                    <span className="font-mono text-xs font-bold block text-ink">Google Meet on Booking</span>
-                    <span className="font-mono text-[10px] text-muted-foreground block">Auto-creates Google Meet and dispatches link</span>
+                    <span className="font-mono text-xs font-bold block text-ink">Live Video on Booking</span>
+                    <span className="font-mono text-[10px] text-muted-foreground block">Auto-creates live video room and dispatches link</span>
                   </div>
                   <input
                     type="checkbox"
@@ -629,7 +629,7 @@ export function WhatsAppModule({ companyName = "VyaperiX" }: WhatsAppModuleProps
                   2. Sub-Second Automation
                 </span>
                 <p className="text-muted-foreground">
-                  Groq evaluates meeting intent or extracts requirements, and sends WhatsApp confirmation with Google Meet link.
+                  Groq evaluates meeting intent or extracts requirements, and sends WhatsApp confirmation with Live Video link.
                 </p>
               </div>
             </div>

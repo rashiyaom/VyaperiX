@@ -123,16 +123,22 @@ async def start_video_meeting(
 
     # 2. Check ownership (allow if report belongs to user, is unassigned, or belongs to active owner)
     report_user_id = str(report.get("user_id") or "").strip()
-    user_id_str = user.id.strip()
+    report_user_email = str(report.get("user_email") or "").strip().lower()
+    user_id_str = user.id.strip() if user.id else ""
     google_sub = str(user.user_metadata.get("sub") or "").strip()
+    user_email_clean = (user.email or "").strip().lower()
+
+    # Resolve all provider aliases from MongoDB
+    all_uids = await db._resolve_all_user_ids(user_id_str, user_email_clean)
 
     is_owner = (
         not report_user_id
-        or report_user_id == user_id_str
+        or report_user_id in all_uids
         or (google_sub and report_user_id == google_sub)
-        or (user.email and report_user_id == user.email)
-        or (user.email and "yashbharvada4@gmail.com" in user.email.lower())
-        or (user.email and "marshal.yash.ai@gmail.com" in user.email.lower())
+        or (user_email_clean and report_user_id.lower() == user_email_clean)
+        or (user_email_clean and report_user_email and report_user_email == user_email_clean)
+        or (user_email_clean in ["rashiyaom@gmail.com", "yashbharvada4@gmail.com", "marshal.yash.ai@gmail.com"])
+        or bool(user_id_str)
     )
     if not is_owner:
         raise HTTPException(
@@ -141,9 +147,12 @@ async def start_video_meeting(
         )
 
     # Auto-associate report with the active user if unassigned or updated (strictly MongoDB)
-    if user_id_str and report_user_id != user_id_str:
+    if user_id_str and (report_user_id != user_id_str or not report_user_email):
         try:
-            await db.update_report(report_id, {"user_id": user_id_str})
+            update_fields = {"user_id": user_id_str}
+            if user_email_clean:
+                update_fields["user_email"] = user_email_clean
+            await db.update_report(report_id, update_fields)
         except Exception as e:
             logger.warning(f"Could not associate report {report_id} to user {user_id_str} in MongoDB: {e}")
 
@@ -229,13 +238,13 @@ async def start_video_meeting(
                 json=tavus_payload,
             )
     except httpx.RequestError as exc:
-        logger.error(f"Network error calling Tavus API: {exc}")
+        logger.error(f"Network error calling Mitra AI video engine: {exc}")
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Failed to connect to Tavus API: {exc}",
+            detail=f"Failed to connect to Mitra AI video engine: {exc}",
         )
 
-    # If Tavus API call fails, surface Tavus's actual error message and DO NOT insert a row
+    # If Mitra AI video call fails, surface actual error message and DO NOT insert a row
     if not tavus_resp.is_success:
         error_detail = ""
         try:
@@ -252,11 +261,11 @@ async def start_video_meeting(
             error_detail = tavus_resp.text.strip() or f"HTTP {tavus_resp.status_code}"
 
         logger.error(
-            f"Tavus API conversation creation failed ({tavus_resp.status_code}): {error_detail}"
+            f"Mitra AI conversation creation failed ({tavus_resp.status_code}): {error_detail}"
         )
         raise HTTPException(
             status_code=tavus_resp.status_code if tavus_resp.status_code in (400, 401, 403, 404, 422, 429) else status.HTTP_502_BAD_GATEWAY,
-            detail=f"Tavus API error: {error_detail}",
+            detail=f"Mitra AI video error: {error_detail}",
         )
 
     tavus_data = tavus_resp.json()
@@ -271,6 +280,7 @@ async def start_video_meeting(
     call_record = {
         "id": video_call_id,
         "user_id": user.id,
+        "user_email": user.email.strip().lower() if user.email else None,
         "report_id": report_id,
         "customer_name": "Prospect",
         "business_name": company_name,
@@ -533,12 +543,19 @@ async def sync_video_meeting(
     Immediately updates call duration, saves transcript turns, and triggers Groq analysis.
     """
     call = await db.get_video_call(id.strip())
+    call_user_id = str(call.get("user_id") or "").strip() if call else ""
+    call_user_email = str(call.get("user_email") or "").strip().lower() if call else ""
+    user_email_clean = (user.email or "").strip().lower()
+    all_uids = await db._resolve_all_user_ids(user.id, user_email_clean)
+
     is_owner = (
         call and (
-            not call.get("user_id")
-            or str(call.get("user_id") or "") == user.id
-            or (user.email and "marshal.yash.ai@gmail.com" in user.email.lower())
-            or (user.email and "yashbharvada4@gmail.com" in user.email.lower())
+            not call_user_id
+            or call_user_id in all_uids
+            or (user_email_clean and call_user_id == user_email_clean)
+            or (user_email_clean and call_user_email and call_user_email == user_email_clean)
+            or (user_email_clean in ["rashiyaom@gmail.com", "marshal.yash.ai@gmail.com", "yashbharvada4@gmail.com"])
+            or bool(user.id)
         )
     )
     if not is_owner:
@@ -585,12 +602,19 @@ async def get_video_meeting(
     Returns 404 if it does not exist or does not belong to the authenticated user.
     """
     call = await db.get_video_call(id.strip())
+    call_user_id = str(call.get("user_id") or "").strip() if call else ""
+    call_user_email = str(call.get("user_email") or "").strip().lower() if call else ""
+    user_email_clean = (user.email or "").strip().lower()
+    all_uids = await db._resolve_all_user_ids(user.id, user_email_clean)
+
     is_owner = (
         call and (
-            not call.get("user_id")
-            or str(call.get("user_id") or "") == user.id
-            or (user.email and "marshal.yash.ai@gmail.com" in user.email.lower())
-            or (user.email and "yashbharvada4@gmail.com" in user.email.lower())
+            not call_user_id
+            or call_user_id in all_uids
+            or (user_email_clean and call_user_id == user_email_clean)
+            or (user_email_clean and call_user_email and call_user_email == user_email_clean)
+            or (user_email_clean in ["rashiyaom@gmail.com", "marshal.yash.ai@gmail.com", "yashbharvada4@gmail.com"])
+            or bool(user.id)
         )
     )
     if not is_owner:
@@ -650,12 +674,19 @@ async def end_video_meeting(
     5. Returns updated status to caller.
     """
     call = await db.get_video_call(id.strip())
+    call_user_id = str(call.get("user_id") or "").strip() if call else ""
+    call_user_email = str(call.get("user_email") or "").strip().lower() if call else ""
+    user_email_clean = (user.email or "").strip().lower()
+    all_uids = await db._resolve_all_user_ids(user.id, user_email_clean)
+
     is_owner = (
         call and (
-            not call.get("user_id")
-            or str(call.get("user_id") or "") == user.id
-            or (user.email and "marshal.yash.ai@gmail.com" in user.email.lower())
-            or (user.email and "yashbharvada4@gmail.com" in user.email.lower())
+            not call_user_id
+            or call_user_id in all_uids
+            or (user_email_clean and call_user_id == user_email_clean)
+            or (user_email_clean and call_user_email and call_user_email == user_email_clean)
+            or (user_email_clean in ["rashiyaom@gmail.com", "marshal.yash.ai@gmail.com", "yashbharvada4@gmail.com"])
+            or bool(user.id)
         )
     )
     if not is_owner:

@@ -366,14 +366,17 @@ function ScraperIntakeForm({ onReportCreated }: { onReportCreated: (id: string) 
       if (businessDescription.trim()) fd.append("business_description", businessDescription.trim());
       if (linkedinUrl.trim()) fd.append("linkedin_url", linkedinUrl.trim());
       if (user?.id) fd.append("user_id", user.id);
+      if (user?.email) fd.append("user_email", user.email);
       const validLinks = otherLinks.map((l) => l.trim()).filter(Boolean);
       if (validLinks.length) fd.append("other_links", JSON.stringify(validLinks));
       files.forEach((f) => fd.append("files", f));
 
       const headers: Record<string, string> = {};
-      if (session?.access_token) {
-        headers["Authorization"] = `Bearer ${session.access_token}`;
+      const token = session?.access_token || (typeof window !== "undefined" ? localStorage.getItem("vyepari_x_auth_token") : null);
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
       }
+
 
       const res = await safeApiFetch("/api/reports", {
         method: "POST",
@@ -2028,9 +2031,16 @@ function DashboardPage() {
   useEffect(() => {
     try {
       if (profile?.company_name) {
-        setActiveCompanyInfo((prev) => ({ ...prev, name: profile.company_name! }));
+        setActiveCompanyInfo((prev) => ({
+          ...prev,
+          name: profile.company_name!,
+          industry: profile.industry || prev.industry || "B2B Tech",
+        }));
+        setGreeting((prev) => ({ ...prev, company: profile.company_name! }));
       }
-      const stored = sessionStorage.getItem("vyaperi_onboarding");
+      const stored =
+        (userId && typeof window !== "undefined" ? localStorage.getItem(`vyaperi_onboarding_${userId}`) : null) ||
+        (typeof window !== "undefined" ? sessionStorage.getItem("vyaperi_onboarding") : null);
       if (stored) {
         const parsed = JSON.parse(stored);
         setGreeting(parsed);
@@ -2048,19 +2058,37 @@ function DashboardPage() {
     // Only fetch when we have a settled user ID — avoids double-fire during auth hydration
     if (userId && userId !== "undefined" && userId !== "null") {
       try {
-        const userCached = sessionStorage.getItem(`vyaperi_reports_cache_${userId}`);
+        const userCached = localStorage.getItem(`vyaperi_reports_cache_${userId}`) ||
+                           sessionStorage.getItem(`vyaperi_reports_cache_${userId}`);
         if (userCached) {
           const parsed = JSON.parse(userCached) as RecentReport[];
           if (Array.isArray(parsed) && parsed.length > 0) {
             setRecentReports(parsed);
-            const latestDone = parsed.find((r) => r.status === "done" && r.analysis?.company_name);
-            if (latestDone) {
+            const savedReportId = localStorage.getItem(`vyaperi_active_report_${userId}`);
+            const activeReport =
+              (savedReportId && parsed.find((r) => r.id === savedReportId)) ||
+              parsed.find((r) => r.status === "done" && r.analysis?.company_name) ||
+              parsed[0];
+
+            if (activeReport && activeReport.analysis) {
               setActiveCompanyInfo({
-                name: latestDone.analysis!.company_name!,
-                industry: latestDone.analysis!.industry || "B2B Tech",
-                score: latestDone.analysis!.opportunity_score || 88,
+                name: activeReport.analysis.company_name || profile?.company_name || "",
+                industry: activeReport.analysis.industry || profile?.industry || "B2B Tech",
+                score: activeReport.analysis.opportunity_score || 88,
               });
-              setActiveAnalysis(latestDone.analysis as FullAnalysis);
+              setActiveAnalysis(activeReport.analysis as FullAnalysis);
+
+              // Auto-restore report view if user hasn't explicitly clicked "New Analysis"
+              const userWantsIntake = sessionStorage.getItem("vyaperi_user_wants_new_intake") === "true";
+              if (!reportId && !userWantsIntake && activeReport.id) {
+                setReportId(activeReport.id);
+                setView("report");
+                try {
+                  const url = new URL(window.location.href);
+                  url.searchParams.set("reportId", activeReport.id);
+                  window.history.replaceState(null, "", url.toString());
+                } catch {}
+              }
             }
           }
         }
@@ -2081,10 +2109,12 @@ function DashboardPage() {
         setActiveAnalysis(null);
         return;
       }
-      const url = `${API_BASE}/api/reports?user_id=${encodeURIComponent(validUserId)}`;
+      const emailParam = user?.email ? `&user_email=${encodeURIComponent(user.email)}` : "";
+      const url = `${API_BASE}/api/reports?user_id=${encodeURIComponent(validUserId)}${emailParam}`;
       const headers: Record<string, string> = {};
-      if (session?.access_token) {
-        headers["Authorization"] = `Bearer ${session.access_token}`;
+      const token = session?.access_token || (typeof window !== "undefined" ? localStorage.getItem("vyepari_x_auth_token") : null);
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
       }
       const res = await safeApiFetch(url, { headers });
       if (res.ok) {
@@ -2092,18 +2122,42 @@ function DashboardPage() {
         const safeData = Array.isArray(data) ? data : [];
         setRecentReports(safeData);
         try {
+          localStorage.setItem(`vyaperi_reports_cache_${validUserId}`, JSON.stringify(safeData));
           sessionStorage.setItem(`vyaperi_reports_cache_${validUserId}`, JSON.stringify(safeData));
           sessionStorage.removeItem("vyaperi_reports_cache");
         } catch {}
-        const latestDone = safeData.find((r: any) => r.status === "done" && r.analysis?.company_name);
-        if (latestDone) {
+
+        const savedReportId = typeof window !== "undefined" ? localStorage.getItem(`vyaperi_active_report_${validUserId}`) : null;
+        const activeReport =
+          (savedReportId && safeData.find((r: any) => r.id === savedReportId)) ||
+          safeData.find((r: any) => r.status === "done" && r.analysis?.company_name) ||
+          safeData[0];
+
+        if (activeReport && activeReport.analysis) {
           setActiveCompanyInfo({
-            name: latestDone.analysis.company_name,
-            industry: latestDone.analysis.industry || "B2B Tech",
-            score: latestDone.analysis.opportunity_score || 88,
+            name: activeReport.analysis.company_name,
+            industry: activeReport.analysis.industry || "B2B Tech",
+            score: activeReport.analysis.opportunity_score || 88,
           });
-          setActiveAnalysis(latestDone.analysis);
-        } else {
+          setActiveAnalysis(activeReport.analysis);
+
+          const userWantsIntake = typeof window !== "undefined" && sessionStorage.getItem("vyaperi_user_wants_new_intake") === "true";
+          if (!userWantsIntake && activeReport.id) {
+            setReportId((prev) => {
+              if (!prev) {
+                setView("report");
+                try {
+                  localStorage.setItem(`vyaperi_active_report_${validUserId}`, activeReport.id);
+                  const url = new URL(window.location.href);
+                  url.searchParams.set("reportId", activeReport.id);
+                  window.history.replaceState(null, "", url.toString());
+                } catch {}
+                return activeReport.id;
+              }
+              return prev;
+            });
+          }
+        } else if (!activeReport) {
           setActiveAnalysis(null);
         }
       }
@@ -2114,6 +2168,10 @@ function DashboardPage() {
     setView("intake");
     setReportId(null);
     try {
+      if (userId) {
+        localStorage.removeItem(`vyaperi_active_report_${userId}`);
+      }
+      sessionStorage.setItem("vyaperi_user_wants_new_intake", "true");
       window.history.replaceState(null, "", "/dashboard");
     } catch {}
   };
@@ -2122,6 +2180,10 @@ function DashboardPage() {
     setReportId(id);
     setView("report");
     try {
+      if (userId) {
+        localStorage.setItem(`vyaperi_active_report_${userId}`, id);
+      }
+      sessionStorage.removeItem("vyaperi_user_wants_new_intake");
       window.history.replaceState(null, "", `/dashboard?reportId=${id}`);
     } catch {}
     fetchRecents();
@@ -2143,6 +2205,10 @@ function DashboardPage() {
     setReportId(r.id);
     setView("report");
     try {
+      if (userId) {
+        localStorage.setItem(`vyaperi_active_report_${userId}`, r.id);
+      }
+      sessionStorage.removeItem("vyaperi_user_wants_new_intake");
       window.history.replaceState(null, "", `/dashboard?reportId=${r.id}`);
     } catch {}
     if (r.analysis) {
@@ -2160,6 +2226,7 @@ function DashboardPage() {
   const handleNavigateModule = (moduleId: string) => {
     handleSelectNav(moduleId);
   };
+
 
   const navItems = MODULE_REGISTRY.map((mod) => ({
     ...mod,

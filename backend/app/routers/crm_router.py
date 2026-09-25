@@ -15,6 +15,7 @@ Endpoints:
 import csv
 import io
 import logging
+import os
 import uuid
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Header, Query, Response
@@ -43,6 +44,7 @@ class CRMSettingsPayload(BaseModel):
 class SyncLeadRequest(BaseModel):
     lead_id: Optional[str] = Field(None, description="Database ID of the prospect lead")
     user_id: Optional[str] = Field(None, description="Owner user ID")
+    user_email: Optional[str] = Field(None, description="Owner user email")
     company: Optional[str] = Field(None, description="Company name")
     name: Optional[str] = Field(None, description="Contact person or team name")
     email: Optional[str] = Field(None, description="Contact email")
@@ -55,6 +57,7 @@ class SyncLeadRequest(BaseModel):
 class SyncMeetingRequest(BaseModel):
     event_id: Optional[str] = Field(None, description="Calendar event UUID")
     user_id: Optional[str] = Field(None, description="Owner user ID")
+    user_email: Optional[str] = Field(None, description="Owner user email")
     meeting_id: Optional[str] = None
     customer_name: Optional[str] = None
     contact_name: Optional[str] = None
@@ -72,26 +75,31 @@ class SyncMeetingRequest(BaseModel):
 @router.get("/status")
 async def get_crm_status(
     user_id: Optional[str] = Query(None),
+    user_email: Optional[str] = Query(None),
     authorization: Optional[str] = Header(None),
 ):
     """
     Returns active CRM integration status, credentials state, and pipeline summary.
     """
     resolved_user_id = user_id
-    if (not resolved_user_id or str(resolved_user_id).lower() in ("undefined", "null", "")) and authorization:
+    resolved_user_email = user_email
+    if authorization:
         try:
             user = await auth_middleware.get_current_user(authorization)
             if user:
-                resolved_user_id = user.id
+                if not resolved_user_id or str(resolved_user_id).lower() in ("undefined", "null", ""):
+                    resolved_user_id = user.id
+                if not resolved_user_email:
+                    resolved_user_email = user.email
         except Exception:
             pass
 
     settings = await db.get_crm_settings(user_id=resolved_user_id)
-    records = await db.list_crm_records(user_id=resolved_user_id, limit=200)
+    records = await db.list_crm_records(user_id=resolved_user_id, user_email=resolved_user_email, limit=200)
 
-    token = settings.get("access_token") or ""
+    token = settings.get("access_token") or os.getenv("HUBSPOT_ACCESS_TOKEN", "") or ""
     has_token = bool(token.strip())
-    webhook_url = settings.get("webhook_url") or ""
+    webhook_url = settings.get("webhook_url") or os.getenv("CRM_WEBHOOK_URL", "") or ""
 
     total_pipeline = sum(float(r.get("deal_amount") or 0.0) for r in records)
     synced_contacts_count = len([r for r in records if r.get("contact_id") or r.get("hubspot_contact_id")])
@@ -273,6 +281,7 @@ async def sync_lead_to_crm(
     crm_record = {
         "id": f"crm-{uuid.uuid4().hex[:10]}",
         "user_id": user_id,
+        "user_email": payload.user_email,
         "lead_id": payload.lead_id,
         "company": lead_dict.get("company"),
         "contact_name": lead_dict.get("name") or f"{lead_dict.get('company')} Team",
@@ -290,7 +299,7 @@ async def sync_lead_to_crm(
         "status": "synced",
         "synced_at": db._now_iso(),
     }
-    rec_id = await db.save_crm_record(crm_record, user_id=user_id)
+    rec_id = await db.save_crm_record(crm_record, user_id=user_id, user_email=payload.user_email)
 
     # 5. Update Lead in MongoDB if linked
     if payload.lead_id:
@@ -408,6 +417,7 @@ async def sync_meeting_to_crm(
     crm_record = {
         "id": f"crm-meet-{uuid.uuid4().hex[:8]}",
         "user_id": user_id,
+        "user_email": payload.user_email,
         "event_id": event_id,
         "company": company,
         "contact_name": customer_name,
@@ -425,7 +435,7 @@ async def sync_meeting_to_crm(
         "mode": deal_res.get("mode", "sandbox"),
         "synced_at": db._now_iso(),
     }
-    rec_id = await db.save_crm_record(crm_record, user_id=user_id)
+    rec_id = await db.save_crm_record(crm_record, user_id=user_id, user_email=payload.user_email)
 
     return {
         "success": True,
@@ -442,6 +452,7 @@ async def sync_meeting_to_crm(
 @router.get("/records")
 async def list_crm_records(
     user_id: Optional[str] = Query(None),
+    user_email: Optional[str] = Query(None),
     limit: int = Query(100, ge=1, le=200),
     authorization: Optional[str] = Header(None),
 ):
@@ -449,36 +460,116 @@ async def list_crm_records(
     List all synced CRM records from MongoDB.
     """
     resolved_user_id = user_id
-    if (not resolved_user_id or str(resolved_user_id).lower() in ("undefined", "null", "")) and authorization:
+    resolved_user_email = user_email
+    if authorization:
         try:
             user = await auth_middleware.get_current_user(authorization)
             if user:
-                resolved_user_id = user.id
+                if not resolved_user_id or str(resolved_user_id).lower() in ("undefined", "null", ""):
+                    resolved_user_id = user.id
+                if not resolved_user_email:
+                    resolved_user_email = user.email
         except Exception:
             pass
 
-    records = await db.list_crm_records(user_id=resolved_user_id, limit=limit)
+    records = await db.list_crm_records(user_id=resolved_user_id, user_email=resolved_user_email, limit=limit)
     return {"records": records, "count": len(records)}
+
+
+@router.post("/transfer-test-data")
+async def transfer_test_data(
+    user_id: Optional[str] = Query(None),
+    user_email: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+):
+    """
+    Explicit test data transfer: creates a test commercial contact and pipeline deal,
+    dispatches to HubSpot API / Webhook, and stores verified record in MongoDB.
+    """
+    resolved_user_id = user_id
+    resolved_user_email = user_email
+    if authorization:
+        try:
+            user = await auth_middleware.get_current_user(authorization)
+            if user:
+                if not resolved_user_id or str(resolved_user_id).lower() in ("undefined", "null", ""):
+                    resolved_user_id = user.id
+                if not resolved_user_email:
+                    resolved_user_email = user.email
+        except Exception:
+            pass
+
+    test_lead = {
+        "company": "Tata Communications Enterprise",
+        "name": "Sunil Varma",
+        "email": "sunil.varma@tatacommunications.com",
+        "phone": "+919820011223",
+        "website": "https://tatacommunications.com",
+        "dealSize": "₹2,500,000",
+    }
+
+    settings = await db.get_crm_settings(user_id=resolved_user_id)
+    token = settings.get("access_token") or os.getenv("HUBSPOT_ACCESS_TOKEN", "")
+
+    contact_res = await crm_service.sync_contact(test_lead, token_override=token)
+    deal_amount = 2500000.0
+    deal_res = await crm_service.sync_deal(test_lead, deal_amount=deal_amount, token_override=token)
+
+    crm_record = {
+        "id": f"crm-test-{uuid.uuid4().hex[:8]}",
+        "user_id": resolved_user_id,
+        "user_email": resolved_user_email,
+        "company": test_lead["company"],
+        "contact_name": test_lead["name"],
+        "email": test_lead["email"],
+        "phone": test_lead["phone"],
+        "deal_amount": deal_amount,
+        "deal_stage": "qualifiedtobuy",
+        "provider": "hubspot",
+        "contact_id": contact_res.get("contact_id"),
+        "deal_id": deal_res.get("deal_id"),
+        "hubspot_contact_id": contact_res.get("contact_id"),
+        "hubspot_deal_id": deal_res.get("deal_id"),
+        "hubspot_url": deal_res.get("hubspot_url") or contact_res.get("hubspot_url"),
+        "mode": contact_res.get("mode", "sandbox"),
+        "status": "synced",
+        "synced_at": db._now_iso(),
+    }
+    rec_id = await db.save_crm_record(crm_record, user_id=resolved_user_id, user_email=resolved_user_email)
+
+    return {
+        "success": True,
+        "message": f"Verified CRM data transfer successful! Contact: {contact_res.get('contact_id')}, Deal: {deal_res.get('deal_id')}",
+        "mode": contact_res.get("mode"),
+        "record_id": rec_id,
+        "contact": contact_res,
+        "deal": deal_res,
+    }
 
 
 @router.get("/export-csv")
 async def export_crm_csv(
     user_id: Optional[str] = Query(None),
+    user_email: Optional[str] = Query(None),
     authorization: Optional[str] = Header(None),
 ):
     """
     Export all synced CRM records as a downloadable CSV.
     """
     resolved_user_id = user_id
-    if (not resolved_user_id or str(resolved_user_id).lower() in ("undefined", "null", "")) and authorization:
+    resolved_user_email = user_email
+    if authorization:
         try:
             user = await auth_middleware.get_current_user(authorization)
             if user:
-                resolved_user_id = user.id
+                if not resolved_user_id or str(resolved_user_id).lower() in ("undefined", "null", ""):
+                    resolved_user_id = user.id
+                if not resolved_user_email:
+                    resolved_user_email = user.email
         except Exception:
             pass
 
-    records = await db.list_crm_records(user_id=resolved_user_id, limit=500)
+    records = await db.list_crm_records(user_id=resolved_user_id, user_email=resolved_user_email, limit=500)
 
     output = io.StringIO()
     writer = csv.writer(output)

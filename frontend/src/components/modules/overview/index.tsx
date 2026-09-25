@@ -411,11 +411,11 @@ export function OverviewDashboard({ onNavigate }: { onNavigate?: (mod: string) =
     },
     {
       id: "video",
-      label: "Video Agent",
+      label: "Mitra AI Video",
       icon: Video,
-      value: "Mitra AI",
+      value: "Mitra AI - Vyepari X",
       status: "operational",
-      sub: "Tavus CVI Ready",
+      sub: "Video Meeting Ready",
     },
     {
       id: "calendar",

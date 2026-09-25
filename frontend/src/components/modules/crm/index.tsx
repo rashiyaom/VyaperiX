@@ -107,17 +107,29 @@ export function CRMModule({ companyName = "VyaperiX" }: CRMModuleProps) {
   const [syncSuccessMsg, setSyncSuccessMsg] = useState<string | null>(null);
   const [syncErrorMsg, setSyncErrorMsg] = useState<string | null>(null);
 
+  // Transfer Test Data State
+  const [transferringTest, setTransferringTest] = useState<boolean>(false);
+  const [transferResult, setTransferResult] = useState<{
+    success: boolean;
+    record_id?: string;
+    contact_id?: string;
+    deal_id?: string;
+    mode?: string;
+    message?: string;
+  } | null>(null);
+
   // Search and Filter State
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [stageFilter, setStageFilter] = useState<string>("all");
 
-  // Fetch status and records
+  // Fetch status and records with unified user identity
   const loadData = async () => {
     try {
       setRefreshing(true);
       const headers = getAuthHeaders(session?.access_token);
-      const userParam = user?.id ? `?user_id=${encodeURIComponent(user.id)}` : "";
-      const recUserParam = user?.id ? `&user_id=${encodeURIComponent(user.id)}` : "";
+      const emailParam = user?.email ? `&user_email=${encodeURIComponent(user.email)}` : "";
+      const userParam = user?.id ? `?user_id=${encodeURIComponent(user.id)}${emailParam}` : (user?.email ? `?user_email=${encodeURIComponent(user.email)}` : "");
+      const recUserParam = user?.id ? `&user_id=${encodeURIComponent(user.id)}${emailParam}` : emailParam;
       const [statusRes, recordsRes] = await Promise.all([
         fetch(`${API_BASE}/api/crm/status${userParam}`, { headers }),
         fetch(`${API_BASE}/api/crm/records?limit=100${recUserParam}`, { headers }),
@@ -145,7 +157,42 @@ export function CRMModule({ companyName = "VyaperiX" }: CRMModuleProps) {
 
   useEffect(() => {
     loadData();
-  }, [user?.id]);
+  }, [user?.id, user?.email]);
+
+  // Transfer Live Test Commercial Lead
+  const handleTransferTestData = async () => {
+    setTransferringTest(true);
+    setTransferResult(null);
+    try {
+      const headers = getAuthHeaders(session?.access_token);
+      const emailParam = user?.email ? `&user_email=${encodeURIComponent(user.email)}` : "";
+      const userParam = user?.id ? `?user_id=${encodeURIComponent(user.id)}` : "?user_id=default";
+      const res = await fetch(`${API_BASE}/api/crm/transfer-test-data${userParam}${emailParam}`, {
+        method: "POST",
+        headers,
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || "CRM data transfer failed");
+      }
+      setTransferResult({
+        success: true,
+        record_id: data.record_id,
+        contact_id: data.contact_id,
+        deal_id: data.deal_id,
+        mode: data.mode,
+        message: `✓ Test commercial lead transferred to CRM! Contact ID: ${data.contact_id}, Deal ID: ${data.deal_id} (${data.mode === "live" ? "Live HubSpot v3 API" : "Safe Sandbox Mode (Stored in MongoDB)"})`,
+      });
+      await loadData();
+    } catch (err: any) {
+      setTransferResult({
+        success: false,
+        message: err.message || "Failed to transfer test data",
+      });
+    } finally {
+      setTransferringTest(false);
+    }
+  };
 
   // Save Settings
   const handleSaveSettings = async (e: React.FormEvent) => {
@@ -318,6 +365,16 @@ export function CRMModule({ companyName = "VyaperiX" }: CRMModuleProps) {
           </button>
 
           <button
+            onClick={handleTransferTestData}
+            disabled={transferringTest}
+            className="border border-emerald-600 bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-2 label-mono text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm"
+            title="Transfer test commercial lead and deal to CRM and verify data flow"
+          >
+            <Sparkles className={`w-3.5 h-3.5 ${transferringTest ? "animate-spin" : ""}`} />
+            {transferringTest ? "Transferring Data..." : "Transfer Test Data"}
+          </button>
+
+          <button
             onClick={handleSyncAllLeads}
             disabled={syncingAll}
             className="border border-violet bg-violet text-violet-foreground px-4 py-2 label-mono text-xs font-black uppercase hover:bg-violet/90 flex items-center gap-2 transition-all shadow-sm"
@@ -329,6 +386,29 @@ export function CRMModule({ companyName = "VyaperiX" }: CRMModuleProps) {
       </div>
 
       {/* Alert Notices */}
+      {transferResult && (
+        <div className={`border p-3.5 flex items-center justify-between text-xs font-mono shadow-xs ${
+          transferResult.success
+            ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200"
+            : "border-destructive/40 bg-destructive/10 text-destructive"
+        }`}>
+          <div className="flex items-center gap-2">
+            {transferResult.success ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+            ) : (
+              <AlertCircle className="w-4 h-4 shrink-0" />
+            )}
+            <span>{transferResult.message}</span>
+          </div>
+          <button
+            onClick={() => setTransferResult(null)}
+            className="text-[10px] uppercase font-bold underline ml-2 shrink-0"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {syncSuccessMsg && (
         <div className="border border-lime/40 bg-lime/10 p-3 flex items-center justify-between text-xs font-mono text-lime-800 dark:text-lime-200">
           <div className="flex items-center gap-2">

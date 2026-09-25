@@ -82,7 +82,7 @@ class HubSpotCRMService:
         """
         Verify connection with HubSpot API.
         """
-        token = (token_override or self.access_token).strip()
+        token = (token_override or self.access_token or get_default_hubspot_token()).strip()
         if not token:
             return {
                 "connected": False,
@@ -132,7 +132,7 @@ class HubSpotCRMService:
         """
         Create or update a Contact in HubSpot CRM.
         """
-        token = (token_override or self.access_token).strip()
+        token = (token_override or self.access_token or get_default_hubspot_token()).strip()
 
         # Parse contact fields
         company = lead.get("company") or "Target Company"
@@ -213,7 +213,7 @@ class HubSpotCRMService:
         """
         Create a Deal in HubSpot CRM associated with the prospect.
         """
-        token = (token_override or self.access_token).strip()
+        token = (token_override or self.access_token or get_default_hubspot_token()).strip()
 
         company = lead.get("company") or "Target Account"
         amount = deal_amount or _parse_deal_amount(lead.get("dealSize"))
