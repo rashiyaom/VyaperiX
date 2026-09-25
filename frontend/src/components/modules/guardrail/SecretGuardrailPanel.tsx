@@ -332,9 +332,21 @@ export function SecretGuardrailPanel({
 
           <form onSubmit={handleVerifyPin} className="mt-8 space-y-4">
             <div className="space-y-2">
-              <label className="text-xs font-mono font-medium text-muted-foreground block text-left">
-                Security Passcode
-              </label>
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-mono font-medium text-muted-foreground block text-left">
+                  Security Passcode
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPin("8899");
+                    setPinError("");
+                  }}
+                  className="text-[11px] font-mono text-primary hover:underline hover:text-primary/80 transition-colors flex items-center gap-1 cursor-pointer"
+                >
+                  <Sparkles className="w-3 h-3 text-amber-500" /> Default: <strong className="text-foreground bg-secondary/80 px-1.5 py-0.5 rounded border border-border/50">8899</strong>
+                </button>
+              </div>
               <div className="relative">
                 <input
                   type="password"
@@ -347,6 +359,9 @@ export function SecretGuardrailPanel({
                 />
                 <Lock className="w-4 h-4 text-muted-foreground absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
               </div>
+              <p className="text-[11px] font-mono text-muted-foreground text-left">
+                First time logging in? The master setup PIN is <strong className="text-foreground">8899</strong>. You can customize this in Shield Settings once unlocked.
+              </p>
             </div>
 
             {pinError && (
