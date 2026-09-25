@@ -194,27 +194,78 @@ Full Conversation Transcript:
 \"\"\"
 """
 
+    def _safe_parse_json(text: str) -> dict:
+        if not text:
+            return {}
+        clean = re.sub(r"^```json\s*", "", text.strip(), flags=re.MULTILINE)
+        clean = re.sub(r"^```\s*", "", clean, flags=re.MULTILINE)
+        clean = clean.rstrip("`").strip()
+        try:
+            return json.loads(clean)
+        except Exception:
+            m = re.search(r"\{.*\}", clean, re.DOTALL)
+            if m:
+                try:
+                    return json.loads(m.group(0))
+                except Exception:
+                    pass
+        return {}
+
     try:
         from groq import AsyncGroq
         client = AsyncGroq(api_key=api_key)
-        response = await client.chat.completions.create(
-            model=groq_client.GROQ_MODEL,
-            messages=[
-                {"role": "system", "content": TRANSCRIPT_MEETING_EXTRACTION_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=0.1,
-            response_format={"type": "json_object"},
-            max_tokens=600,
-        )
+        raw = ""
+        try:
+            response = await client.chat.completions.create(
+                model=groq_client.GROQ_MODEL,
+                messages=[
+                    {"role": "system", "content": TRANSCRIPT_MEETING_EXTRACTION_PROMPT},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.1,
+                response_format={"type": "json_object"},
+                max_tokens=2048,
+            )
+            raw = response.choices[0].message.content.strip()
+        except Exception as groq_err:
+            logger.warning(f"Groq json_object meeting extraction failed ({groq_err}), retrying standard text mode...")
+            response = await client.chat.completions.create(
+                model=groq_client.GROQ_MODEL,
+                messages=[
+                    {"role": "system", "content": TRANSCRIPT_MEETING_EXTRACTION_PROMPT},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.1,
+                max_tokens=2048,
+            )
+            raw = response.choices[0].message.content.strip()
 
-        raw = response.choices[0].message.content.strip()
-        parsed = json.loads(raw)
-
-        if not parsed.get("meeting_booked"):
-            logger.info(f"No meeting booked detected in transcript for call {call_id}")
+        parsed = _safe_parse_json(raw)
+    except Exception as e:
+        logger.warning(f"Groq meeting extraction failed ({e}), attempting Gemini backup...")
+        gemini_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY_BACKUP")
+        if gemini_key:
+            try:
+                from google import genai
+                g_client = genai.Client(api_key=gemini_key)
+                g_resp = g_client.models.generate_content(
+                    model="gemini-3.8-flash",
+                    contents=f"{TRANSCRIPT_MEETING_EXTRACTION_PROMPT}\n\n{user_prompt}",
+                    config={"response_mime_type": "application/json"}
+                )
+                raw = g_resp.text or "{}"
+                parsed = _safe_parse_json(raw)
+            except Exception as g_err:
+                logger.error(f"Gemini backup meeting extraction error: {g_err}")
+                return None
+        else:
             return None
 
+    if not parsed or not parsed.get("meeting_booked"):
+        logger.info(f"No meeting booked detected in transcript for call {call_id}")
+        return None
+
+    try:
         # Process timestamps
         start_str = parsed.get("suggested_start_iso")
         duration = int(parsed.get("duration_minutes") or 30)
@@ -253,9 +304,8 @@ Full Conversation Transcript:
             "call_id": call_id,
         }
         return extracted
-
     except Exception as e:
-        logger.error(f"Error extracting meeting from transcript: {e}", exc_info=True)
+        logger.error(f"Error parsing extracted meeting details: {e}", exc_info=True)
         return None
 
 

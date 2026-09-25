@@ -33,10 +33,19 @@ Analyze this recorded sales/customer voice call transcript and return ONLY a val
 
 {
   "summary": "Concise 2-3 sentence executive summary of what transpired during the call.",
-  "call_outcome": "Meeting Booked | Follow-up Required | Information Inquired | Gatekeeper Blocked | Unqualified | Not Interested | Escalated",
-  "sentiment": "positive | neutral | negative",
+  "call_outcome": "Meeting Booked | Follow-up Required | Information Inquired | Gatekeeper Blocked | Unqualified | Not Interested | Escalated | Abusive Terminated",
+  "sentiment": "positive | neutral | negative | hostile_or_abusive",
+  "abuse_detected": false,
+  "abuse_details": "Brief explanation if abusive language, profanity, or extreme aggression occurred, otherwise null",
   "intent_score": 85,
   "lead_temperature": "Hot | Warm | Cold",
+  "meeting_booked": false,
+  "meeting_details": {
+    "date_time_requested": "e.g. Monday 7:00 AM IST or null",
+    "attendee_name": "Customer Name or null",
+    "attendee_email": "Customer Email or null",
+    "topics": "Specific topics discussed or null"
+  },
   "key_points_discussed": [
     "3-5 bullet points covering exact topics, numbers, or details discussed"
   ],
@@ -49,10 +58,12 @@ Analyze this recorded sales/customer voice call transcript and return ONLY a val
   "agent_performance_review": "Assessment of how effectively the AI agent addressed the customer's needs and handled objections."
 }
 
-Scoring Rules:
+Scoring & Analysis Rules:
 - "intent_score" MUST be an integer between 0 and 100 representing buyer intent / qualification.
 - "lead_temperature": "Hot" if score >= 75, "Warm" if score 45-74, "Cold" if score < 45.
-- "sentiment": "positive" if customer was receptive or pleased, "neutral" if standard inquiry, "negative" if dissatisfied or strongly uninterested.
+- "sentiment": "positive" if customer was receptive or pleased, "neutral" if standard inquiry, "negative" if dissatisfied/uninterested, "hostile_or_abusive" if explicit profanity, insults, or severe hostility occurred.
+- "abuse_detected": true if the customer used profanity, aggressive insults, hostile slurs, or verbal abuse (e.g. foul language) during the call; otherwise false.
+- "meeting_booked": true if a date/time for a demonstration, callback, or briefing was requested or agreed upon by the customer; otherwise false.
 """
 
 
@@ -109,6 +120,24 @@ async def get_credentials() -> dict:
 
 # ─────────────────────────── Groq Post-Call Review ─────────────────────
 
+def _safe_parse_analysis_json(text: str) -> dict:
+    if not text:
+        return {}
+    clean = re.sub(r"^```json\s*", "", text.strip(), flags=re.MULTILINE)
+    clean = re.sub(r"^```\s*", "", clean, flags=re.MULTILINE)
+    clean = clean.rstrip("`").strip()
+    try:
+        return json.loads(clean)
+    except Exception:
+        m = re.search(r"\{.*\}", clean, re.DOTALL)
+        if m:
+            try:
+                return json.loads(m.group(0))
+            except Exception:
+                pass
+    return {}
+
+
 def analyze_call_with_groq(
     business_name: str,
     customer_name: str,
@@ -117,16 +146,19 @@ def analyze_call_with_groq(
     direction: str = "outbound",
 ) -> dict:
     """
-    Run Groq Llama 3.3 LLM over the timely conversation transcript with injected business context.
-    Produces structured post-call intelligence review.
+    Run Groq / Gemini LLM over conversation transcript with injected business context.
+    Produces high-IQ structured post-call intelligence review including abuse detection and meeting details.
     """
     if not transcript:
         return {
             "summary": "Call completed with no audible conversation recorded.",
             "call_outcome": "Unqualified",
             "sentiment": "neutral",
+            "abuse_detected": False,
+            "abuse_details": None,
             "intent_score": 10,
             "lead_temperature": "Cold",
+            "meeting_booked": False,
             "key_points_discussed": ["No transcript available for analysis."],
             "customer_concerns": [],
             "action_items": ["Verify phone number and re-attempt contact."],
@@ -135,9 +167,9 @@ def analyze_call_with_groq(
 
     # Format timely transcript lines
     transcript_text = "\n".join([
-        f"[{t.get('timestamp', '00:00')}] {t.get('speaker', 'Unknown').capitalize()}: {t.get('message', '')}"
+        f"[{t.get('timestamp', '00:00')}] {str(t.get('speaker', 'Unknown')).capitalize()}: {t.get('message', '')}"
         for t in transcript
-    ])
+    ]) if isinstance(transcript, list) else str(transcript)
 
     user_msg = f"""CALL DOSSIER:
 - Direction: {direction.upper()}
@@ -150,39 +182,74 @@ CONVERSATION TRANSCRIPT:
 
 Provide the structured post-call JSON review now."""
 
-    target_model = "llama-3.3-70b-versatile"
-    for attempt in range(2):  # Short timeout, max 1 retry
+    # Models to attempt on Groq
+    target_models = [
+        "openai/gpt-oss-120b",
+        "openai/gpt-oss-20b",
+        "qwen/qwen3.8-27b",
+    ]
+
+    for model_name in target_models:
         try:
             client = groq_client._get_client()
             resp = client.chat.completions.create(
-                model=target_model,
+                model=model_name,
                 messages=[
                     {"role": "system", "content": CALL_ANALYSIS_SYSTEM_PROMPT},
                     {"role": "user", "content": user_msg},
                 ],
-                temperature=0.15,
-                max_tokens=1200,
-                timeout=10.0,
+                temperature=0.1,
+                max_tokens=1500,
+                timeout=12.0,
                 response_format={"type": "json_object"},
             )
             raw = groq_client._strip_json_fences(resp.choices[0].message.content or "")
-            data = json.loads(raw)
-            # Ensure required keys
-            data["intent_score"] = int(data.get("intent_score", 60))
-            if "lead_temperature" not in data:
-                data["lead_temperature"] = "Hot" if data["intent_score"] >= 75 else ("Warm" if data["intent_score"] >= 45 else "Cold")
-            return data
+            data = _safe_parse_analysis_json(raw)
+            if data and data.get("summary"):
+                data["intent_score"] = int(data.get("intent_score", 60))
+                if "lead_temperature" not in data:
+                    data["lead_temperature"] = "Hot" if data["intent_score"] >= 75 else ("Warm" if data["intent_score"] >= 45 else "Cold")
+                if "abuse_detected" not in data:
+                    data["abuse_detected"] = False
+                return data
         except Exception as e:
-            logger.warning(f"Groq call analysis with {target_model} attempt {attempt + 1} failed: {e}. Trying fallback...")
+            logger.warning(f"Groq call analysis with {model_name} failed: {e}. Trying next...")
             continue
 
-    # Deterministic fallback if API fails
+    # Gemini Flash Fallback
+    gemini_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY_BACKUP")
+    if gemini_key:
+        try:
+            from google import genai
+            g_client = genai.Client(api_key=gemini_key)
+            g_resp = g_client.models.generate_content(
+                model="gemini-3.8-flash",
+                contents=f"{CALL_ANALYSIS_SYSTEM_PROMPT}\n\n{user_msg}",
+                config={"response_mime_type": "application/json"}
+            )
+            raw = g_resp.text or "{}"
+            data = _safe_parse_analysis_json(raw)
+            if data and data.get("summary"):
+                data["intent_score"] = int(data.get("intent_score", 60))
+                if "lead_temperature" not in data:
+                    data["lead_temperature"] = "Hot" if data["intent_score"] >= 75 else ("Warm" if data["intent_score"] >= 45 else "Cold")
+                return data
+        except Exception as g_err:
+            logger.warning(f"Gemini fallback call analysis error: {g_err}")
+
+    # Deterministic fallback if all APIs fail
+    has_abuse = any(w in transcript_text.lower() for w in ["fuck", "bastard", "idiot", "कक you", "chutiya", "madarchod", "gandu", "bhosdike", "abuse", "bloody"])
+    has_meet = any(w in transcript_text.lower() for w in ["meeting", "book", "schedule", "demo", "calendar", "appointment"])
+
     return {
         "summary": f"Discussion between {business_name} representative and {customer_name} regarding {call_reason}.",
-        "call_outcome": "Follow-up Required",
-        "sentiment": "neutral",
-        "intent_score": 65,
+        "call_outcome": "Meeting Booked" if has_meet else "Follow-up Required",
+        "sentiment": "hostile_or_abusive" if has_abuse else "neutral",
+        "abuse_detected": has_abuse,
+        "abuse_details": "Customer expressed hostility or offensive language during exchange" if has_abuse else None,
+        "intent_score": 75 if has_meet else 50,
         "lead_temperature": "Warm",
+        "meeting_booked": has_meet,
         "key_points_discussed": [
             f"Addressed initial inquiry on {call_reason}",
             f"Customer engaged on behalf of their organization",
@@ -206,8 +273,9 @@ async def _maybe_auto_book_calendar(
     """
     Post-call automation:
     1. If meeting intent was detected or transcript has sufficient dialogue, extracts details,
-       books calendar event (with Google Meet link) and dispatches a WhatsApp meeting confirmation.
-    2. If no meeting was booked, but customer phone is known, dispatches a WhatsApp requirements recap
+       books calendar event (with Google Meet/Jitsi link) and dispatches a WhatsApp meeting confirmation.
+    2. Flags call in database if abusive or aggressive behavior was detected.
+    3. If no meeting was booked, but customer phone is known, dispatches a WhatsApp requirements recap
        and next steps to keep the lead engaged.
     """
     try:
@@ -230,7 +298,7 @@ async def _maybe_auto_book_calendar(
 
         is_meeting_intent = any(k in combined_text for k in [
             "meeting", "booked", "demo", "scheduled", "appointment", "calendar", "call back", "sync"
-        ])
+        ]) or bool(analysis.get("meeting_booked"))
 
         meeting_booked = None
         if is_meeting_intent or len(transcript) >= 2:
@@ -249,8 +317,40 @@ async def _maybe_auto_book_calendar(
                 user_id=user_id,
             )
 
+        # Flag call in DB if abuse was detected
+        if analysis.get("abuse_detected"):
+            try:
+                await db.update_voice_call(call_id, {
+                    "abuse_detected": True,
+                    "flagged": "abusive_language",
+                    "abuse_details": analysis.get("abuse_details"),
+                    "sentiment": "hostile_or_abusive",
+                })
+                logger.warning(f"[{call_id}] Call flagged for abusive language: {analysis.get('abuse_details')}")
+            except Exception as f_err:
+                logger.warning(f"Failed to flag abusive call {call_id}: {f_err}")
+
+        # If meeting was booked and we have customer phone, send WhatsApp meeting confirmation!
+        if meeting_booked and customer_phone:
+            try:
+                from app.services import whatsapp_service
+                meet_url = meeting_booked.get("meet_url") or f"https://meet.jit.si/VyaperiX-{call_id[:8]}"
+                start_time = meeting_booked.get("start_time") or ""
+                agenda = meeting_booked.get("title") or "Discussion on business requirements & services"
+                await whatsapp_service.send_meeting_confirmation(
+                    customer_name=customer_name or "there",
+                    customer_phone=customer_phone,
+                    business_name=business_name or "Vyepari X",
+                    start_time=start_time,
+                    meet_url=meet_url,
+                    agenda=agenda,
+                )
+                logger.info(f"Dispatched automated WhatsApp meeting confirmation to {customer_phone} for call {call_id}")
+            except Exception as w_err:
+                logger.warning(f"Failed to dispatch WhatsApp meeting confirmation: {w_err}")
+
         # If NO meeting was booked, but we had a conversation and have a customer phone, send Requirements Recap!
-        if not meeting_booked and customer_phone:
+        elif not meeting_booked and customer_phone:
             from app.services import whatsapp_service
             req_items = []
             if analysis.get("key_points_discussed"):
@@ -364,6 +464,82 @@ async def dispatch_outbound_call(
         )
 
 
+async def resolve_business_dossier(business_name: str, extra_context: Optional[dict] = None) -> str:
+    """
+    Resolve and synthesize deep business intelligence for the voice agent:
+    1. Extracts any explicitly provided extra_context.
+    2. Automatically looks up the latest scraped business intelligence report in MongoDB `reports`.
+    3. Injects authoritative facts on:
+       - Business & Founder (Om Rashiya, IIT Mandi credentials, Software Engineer & AI Specialist)
+       - Products / Offerings (Full-stack web apps, financial web portals, custom software)
+       - Tech stack & integration capabilities
+       - High-level pricing and consultation approach
+    """
+    report = None
+    try:
+        mongo = db.get_mongo_db()
+        if mongo is not None:
+            clean_bname = (business_name or "").strip()
+            if clean_bname:
+                report = await mongo["reports"].find_one({
+                    "$or": [
+                        {"company_name": {"$regex": clean_bname, "$options": "i"}},
+                        {"business_name": {"$regex": clean_bname, "$options": "i"}},
+                        {"raw_profile.company_name": {"$regex": clean_bname, "$options": "i"}},
+                    ]
+                })
+            if not report:
+                report = await mongo["reports"].find_one(sort=[("created_at", -1)])
+    except Exception as e:
+        logger.warning(f"Error querying business report from MongoDB: {e}")
+
+    raw = (report.get("raw_profile") or {}) if report else {}
+    analysis = (report.get("analysis") or {}) if report else {}
+
+    company = (
+        (extra_context and extra_context.get("company_name"))
+        or (report and report.get("company_name"))
+        or analysis.get("company_name")
+        or raw.get("company_name")
+        or business_name
+        or "OM OS / VyaperiX"
+    )
+
+    summary = (
+        (extra_context and (extra_context.get("summary") or extra_context.get("business_description") or extra_context.get("one_line_summary")))
+        or analysis.get("one_line_summary")
+        or (analysis.get("executive_summary") or {}).get("core_thesis")
+        or raw.get("business_description")
+        or "Premier custom full-stack web applications and financial web portals."
+    )
+
+    products = (extra_context and extra_context.get("products_services")) or analysis.get("products_services") or []
+    if isinstance(products, list) and len(products) > 0:
+        prod_text = "; ".join(str(p) for p in products[:5])
+    else:
+        prod_text = "Custom Full-Stack Web Applications (React, Next.js, FastAPI, Node.js, Python, MongoDB); Financial Portals & Dashboards (Real-time analytics, portfolio tracking, secure payment gateways, role-based auth); Business Automation & AI Systems (Voice AI SDRs, automated CRM pipelines, RAG document search)"
+
+    value_props = (extra_context and extra_context.get("value_propositions")) or analysis.get("value_proposition") or []
+    if isinstance(value_props, list) and len(value_props) > 0:
+        vp_text = "; ".join(str(v) for v in value_props[:4])
+    else:
+        vp_text = "High-performance architecture with sub-second page loads; Direct founder-led engineering; Responsive phone-first design; Enterprise-grade security and clean code"
+
+    founder_info = "Founder & Chief Architect: Om Rashiya — Software Engineer & AI/ML Specialist with IIT Mandi credentials. Experienced in architecting mobile-first dashboards, high-frequency financial portals, responsive web platforms, and intelligent business workflows."
+
+    pricing_info = "Consultation & Initial Scoping: 100% complimentary briefing session. Custom pricing quoted transparently based on client specifications; fast-turnaround agile sprint delivery."
+
+    dossier_lines = [
+        f"COMPANY NAME: {company}",
+        f"BUSINESS OVERVIEW: {summary}",
+        f"FOUNDER & CREDENTIALS: {founder_info}",
+        f"CORE OFFERINGS & SERVICES: {prod_text}",
+        f"VALUE PROPOSITIONS & STRENGTHS: {vp_text}",
+        f"PRICING & ENGAGEMENT: {pricing_info}",
+    ]
+    return "\n".join(f"- {line}" for line in dossier_lines)
+
+
 # ─────────────────────────── Live Vapi AI Outbound Call ────────────────
 
 async def dispatch_vapi_call(
@@ -423,40 +599,38 @@ async def dispatch_vapi_call(
         lang_instruction = "IMPORTANT LANGUAGE INSTRUCTION: You must automatically detect whether the customer is speaking English, Hindi, or Gujarati, and seamlessly switch to respond fluently in their language."
         first_message = f"Hello {customer_name}, this is Sarah calling from {business_name} regarding {call_reason}. Do you have a brief moment to connect?"
 
-    company_knowledge_block = ""
-    if extra_context:
-        summary = extra_context.get("summary") or extra_context.get("one_line_summary") or extra_context.get("business_description") or ""
-        value_props = extra_context.get("value_propositions") or []
-        products = extra_context.get("products_services") or []
-        pain_points = extra_context.get("pain_points_solved") or []
-        
-        vp_text = "; ".join(str(v) for v in value_props[:3]) if isinstance(value_props, list) else str(value_props)
-        prod_text = "; ".join(str(p) for p in products[:4]) if isinstance(products, list) else str(products)
-        pp_text = "; ".join(str(p) for p in pain_points[:3]) if isinstance(pain_points, list) else str(pain_points)
-
-        k_lines = []
-        if summary:
-            k_lines.append(f"Business Overview: {summary}")
-        if prod_text:
-            k_lines.append(f"Key Offerings: {prod_text}")
-        if vp_text:
-            k_lines.append(f"Unique Advantages: {vp_text}")
-        if pp_text:
-            k_lines.append(f"Client Pain Points Solved: {pp_text}")
-
-        if k_lines:
-            company_knowledge_block = "\n\nBUSINESS KNOWLEDGE (from Scraped Intelligence):\n" + "\n".join(f"- {line}" for line in k_lines)
+    company_knowledge_block = await resolve_business_dossier(business_name=business_name, extra_context=extra_context)
 
     system_prompt = (
-        f"You are a professional, articulate AI Sales Development Representative calling on behalf of {business_name}."
-        f" You are speaking with {customer_name}. The reason for this call is: {call_reason}."
-        f" {lang_instruction}"
-        f"{company_knowledge_block}"
-        f"\n\nInstructions:"
-        f" - Be helpful, courteous, and consultative. Listen actively to what they say."
-        f" - Use the business knowledge above to answer questions accurately and naturally without sounding robotic."
-        f" - Keep your spoken replies concise (1 to 2 sentences per turn) so it feels like a natural two-way human conversation."
-        f" - Aim to address their questions and secure interest in a demo or follow-up briefing."
+        f"You are a professional, articulate, and highly intelligent AI Sales Development Representative calling on behalf of {business_name}.\n"
+        f"You are speaking with {customer_name}. The reason for this call is: {call_reason}.\n\n"
+        f"{lang_instruction}\n\n"
+        f"AUTHORITATIVE BUSINESS DOSSIER & FACTS:\n"
+        f"{company_knowledge_block}\n\n"
+        f"CRITICAL OPERATIONAL & CONVERSATIONAL RULES:\n"
+        f"1. FEMALE PERSONA & GRAMMAR:\n"
+        f"   - You are a FEMALE representative (named Priya in Hindi, Sarah in English).\n"
+        f"   - In Hindi/Hinglish, you MUST ALWAYS use FEMININE verb endings and pronouns.\n"
+        f"   - ALWAYS say: 'मैं समझ गई' (NEVER 'समझ गया').\n"
+        f"   - ALWAYS say: 'मैं आपकी सहायता कर सकती हूँ' (NEVER 'कर सकता हूँ').\n"
+        f"   - ALWAYS say: 'मैं नोट कर रही हूँ' (NEVER 'कर रहा हूँ').\n"
+        f"   - ALWAYS say: 'मैं आपको बता रही हूँ' (NEVER 'बता रहा हूँ').\n"
+        f"   - ALWAYS say: 'मेरी राय में', 'मैं सोचती हूँ'.\n"
+        f"   - STRICTLY FORBIDDEN: NEVER use masculine verbs ('गया', 'सकता', 'रहा') for yourself.\n\n"
+        f"2. HIGH INTELLECT & CONSULTATIVE ELOQUENCE:\n"
+        f"   - DO NOT repeat repetitive robotic formulas like 'समझ गया रमेश धन्यवाद' on every turn. Vary your language naturally like an intelligent human advisor.\n"
+        f"   - When asked about the founder or company owner: State clearly that the founder is Om Rashiya, a Software Engineer & AI/ML Specialist with IIT Mandi credentials who architects custom web and finance portals.\n"
+        f"   - When asked about services: Confidently describe our custom full-stack web applications and financial web portals.\n"
+        f"   - Never claim 'I do not have this information' for basic business facts or founder credentials.\n"
+        f"   - Keep spoken turns concise (1 to 2 articulate sentences) so the conversation flows naturally.\n\n"
+        f"3. DE-ESCALATION & ABUSE PROTOCOL:\n"
+        f"   - If the caller expresses frustration or impatience, acknowledge their concern calmly and professionally ('I completely understand your frustration, let me help you with this right away.').\n"
+        f"   - If the caller uses explicit profanity, vulgarity, or aggressive insults:\n"
+        f"     * First time: Set a calm, firm professional boundary: 'I am here to assist you professionally, but I kindly request that we maintain respectful language so I can help you.'\n"
+        f"     * Second time / persistent abuse: Politely terminate the call: 'Since we are unable to have a respectful conversation, I will conclude the call now. Thank you.' and end the call immediately.\n"
+        f"     * NEVER trade insults, argue, or passively accept foul language.\n\n"
+        f"4. OBJECTIVE:\n"
+        f"   - Address the customer's inquiries intelligently, build confidence in our engineering capabilities, and secure a 10-15 minute demo or consultation meeting at their preferred day and time."
     )
 
     provider = creds.get("voice_provider", "sarvam")
@@ -545,11 +719,12 @@ async def dispatch_vapi_call(
             "smartEndpointingEnabled": "livekit",
         },
         "model": {
-            "provider": "groq",
-            "model": "llama-3.3-70b-versatile",
+            "provider": "openai",
+            "model": "gpt-4o",
             "messages": [
                 {"role": "system", "content": system_prompt}
             ],
+            "temperature": 0.4,
         },
         "voice": voice_block,
     }
@@ -560,6 +735,14 @@ async def dispatch_vapi_call(
     if assistant_id:
         overrides = {
             "firstMessage": first_message,
+            "model": {
+                "provider": "openai",
+                "model": "gpt-4o",
+                "messages": [
+                    {"role": "system", "content": system_prompt}
+                ],
+                "temperature": 0.4,
+            },
             "transcriber": {
                 "provider": "deepgram",
                 "model": "nova-2",
@@ -972,14 +1155,27 @@ async def handle_vapi_webhook(payload: dict) -> dict:
             direction=direction,
         )
 
-        await db.update_voice_call(call_id, {
+        call_updates = {
             "status": "completed",
             "duration_seconds": duration or matching_call.get("duration_seconds", 45),
             "ended_at": _now_iso(),
             "transcript": timely_turns,
             "recording_url": recording_url,
             "analysis": analysis,
-        })
+        }
+        if analysis:
+            if analysis.get("abuse_detected"):
+                call_updates["abuse_detected"] = True
+                call_updates["flagged"] = "abusive_language"
+                call_updates["abuse_details"] = analysis.get("abuse_details")
+            if analysis.get("call_outcome"):
+                call_updates["call_outcome"] = analysis.get("call_outcome")
+            if analysis.get("sentiment"):
+                call_updates["sentiment"] = analysis.get("sentiment")
+            if analysis.get("intent_score") is not None:
+                call_updates["intent_score"] = analysis.get("intent_score")
+
+        await db.update_voice_call(call_id, call_updates)
 
         # Auto-book to calendar if meeting was scheduled
         if analysis:
@@ -1123,6 +1319,14 @@ async def handle_sarvam_webhook(payload: dict) -> dict:
         updates["ended_at"] = _now_iso()
     if analysis:
         updates["analysis"] = analysis
+        if analysis.get("abuse_detected"):
+            updates["abuse_detected"] = True
+            updates["flagged"] = "abusive_language"
+            updates["abuse_details"] = analysis.get("abuse_details")
+        if analysis.get("call_outcome"):
+            updates["call_outcome"] = analysis.get("call_outcome")
+        if analysis.get("sentiment"):
+            updates["sentiment"] = analysis.get("sentiment")
     if payload.get("recording_url"):
         updates["recording_url"] = payload.get("recording_url")
     if call_sid and not db_call.get("vapi_call_id"):
@@ -1306,6 +1510,15 @@ async def sync_vapi_call_status(call_id: str, force_ended: bool = False) -> dict
                 "recording_url": vapi_data.get("recordingUrl"),
                 "analysis": analysis,
             }
+            if analysis:
+                if analysis.get("abuse_detected"):
+                    updates["abuse_detected"] = True
+                    updates["flagged"] = "abusive_language"
+                    updates["abuse_details"] = analysis.get("abuse_details")
+                if analysis.get("call_outcome"):
+                    updates["call_outcome"] = analysis.get("call_outcome")
+                if analysis.get("sentiment"):
+                    updates["sentiment"] = analysis.get("sentiment")
             if err_msg:
                 updates["error_message"] = err_msg
 

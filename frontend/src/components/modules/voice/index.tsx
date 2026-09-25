@@ -55,7 +55,16 @@ interface TranscriptTurn {
 interface CallAnalysis {
   summary?: string;
   call_outcome?: string;
-  sentiment?: "positive" | "neutral" | "negative";
+  sentiment?: "positive" | "neutral" | "negative" | "hostile_or_abusive" | string;
+  abuse_detected?: boolean;
+  abuse_details?: string;
+  meeting_booked?: boolean;
+  meeting_details?: {
+    date_time_requested?: string;
+    attendee_name?: string;
+    attendee_email?: string;
+    topics?: string;
+  };
   intent_score?: number;
   lead_temperature?: "Hot" | "Warm" | "Cold";
   key_points_discussed?: string[];
@@ -80,6 +89,10 @@ interface VoiceCallRecord {
   transcript: TranscriptTurn[];
   recording_url?: string;
   analysis?: CallAnalysis;
+  abuse_detected?: boolean;
+  flagged?: string;
+  call_outcome?: string;
+  sentiment?: string;
   error_message?: string;
   created_at: string;
 }
@@ -1431,6 +1444,16 @@ export function VoiceFleetModule({
                                   COLD ({intentScore}%)
                                 </span>
                               )}
+                              {(call.abuse_detected || call.analysis?.abuse_detected || call.flagged) && (
+                                <span className="border border-red-500/50 bg-red-500/10 text-red-600 dark:text-red-400 px-1.5 py-0.5 text-[9px] font-bold">
+                                  ⚠️ FLAGGED
+                                </span>
+                              )}
+                              {(call.analysis?.meeting_booked || call.call_outcome === "Meeting Booked" || call.analysis?.call_outcome === "Meeting Booked") && (
+                                <span className="border border-lime/50 bg-lime/10 text-lime-700 dark:text-lime px-1.5 py-0.5 text-[9px] font-bold">
+                                  📅 MEETING
+                                </span>
+                              )}
                               <span className="text-[10px] text-muted-foreground truncate max-w-[120px]">
                                 {call.analysis?.call_outcome || "Audited"}
                               </span>
@@ -2769,15 +2792,43 @@ export function VoiceFleetModule({
                             className={`font-display text-base font-bold uppercase ${
                               selectedCall.analysis.sentiment === "positive"
                                 ? "text-lime-700 dark:text-lime"
-                                : selectedCall.analysis.sentiment === "negative"
+                                : selectedCall.analysis.sentiment === "negative" || selectedCall.analysis.sentiment === "hostile_or_abusive"
                                 ? "text-danger"
                                 : "text-ink"
                             }`}
                           >
-                            {selectedCall.analysis.sentiment || "—"}
+                            {selectedCall.analysis.sentiment === "hostile_or_abusive"
+                              ? "Hostile / Abusive"
+                              : selectedCall.analysis.sentiment || "—"}
                           </span>
                         </div>
                       </div>
+
+                      {/* Abusive Language Warning Banner if detected */}
+                      {(selectedCall.analysis.abuse_detected || selectedCall.abuse_detected || selectedCall.flagged) && (
+                        <div className="border border-red-500/40 bg-red-500/10 p-4 space-y-1">
+                          <span className="label-mono text-danger text-[10px] font-bold block uppercase flex items-center gap-1.5">
+                            ⚠️ QA Flag: Abusive / Hostile Language Detected
+                          </span>
+                          <p className="text-xs text-danger font-medium leading-relaxed">
+                            {selectedCall.analysis.abuse_details || selectedCall.flagged || "Caller used aggressive insults, foul language, or profanity during call."}
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Meeting Booked Banner if confirmed */}
+                      {(selectedCall.analysis.meeting_booked || selectedCall.analysis.call_outcome === "Meeting Booked") && (
+                        <div className="border border-lime/40 bg-lime/10 p-4 space-y-1">
+                          <span className="label-mono text-lime-700 dark:text-lime text-[10px] font-bold block uppercase flex items-center gap-1.5">
+                            📅 Meeting Confirmed & Added to Calendar
+                          </span>
+                          <p className="text-xs text-ink font-medium leading-relaxed">
+                            {selectedCall.analysis.meeting_details?.date_time_requested
+                              ? `Requested Time: ${selectedCall.analysis.meeting_details.date_time_requested} • Attendee: ${selectedCall.analysis.meeting_details.attendee_name || selectedCall.customer_name} (${selectedCall.analysis.meeting_details.attendee_email || selectedCall.customer_phone})`
+                              : "Meeting details successfully extracted and synchronized to the Calendar tab."}
+                          </p>
+                        </div>
+                      )}
 
                       {/* Executive Summary */}
                       <div className="border border-ink/15 bg-paper p-4 space-y-2">
