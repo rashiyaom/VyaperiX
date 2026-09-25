@@ -281,8 +281,6 @@ async def create_batch_calls(payload: BatchCallRequest, background_tasks: Backgr
             created_call_ids.append(c_id)
 
             if force_sim:
-                await voice_engine.simulate_call_lifecycle,
-                # ...
                 await voice_engine.simulate_call_lifecycle(
                     call_id=c_id,
                     customer_name=item.customer_name,
