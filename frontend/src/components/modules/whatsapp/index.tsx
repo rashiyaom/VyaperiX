@@ -52,6 +52,7 @@ export function WhatsAppModule({ companyName = "VyaperiX" }: WhatsAppModuleProps
   const [autoMeetingConfirm, setAutoMeetingConfirm] = useState(true);
   const [autoRecap, setAutoRecap] = useState(true);
   const [indicBilingual, setIndicBilingual] = useState(true);
+  const [gatewayError, setGatewayError] = useState<string | null>(null);
 
   // Fetch Gateway Status
   const fetchStatus = async () => {
@@ -63,14 +64,22 @@ export function WhatsAppModule({ companyName = "VyaperiX" }: WhatsAppModuleProps
       if (res.ok) {
         const data = await res.json();
         setStatusData(data);
+        if (data.error && !data.connected) {
+          setGatewayError(data.error);
+        } else {
+          setGatewayError(null);
+        }
         if (!data.connected) {
           fetchQR();
         } else {
           setQrBase64(null);
         }
+      } else {
+        setGatewayError(`Gateway returned status ${res.status}`);
       }
     } catch (e) {
       console.error("Failed to check WhatsApp status:", e);
+      setGatewayError("Cannot connect to WhatsApp Gateway at port 3001.");
     } finally {
       setLoading(false);
     }
@@ -86,10 +95,14 @@ export function WhatsAppModule({ companyName = "VyaperiX" }: WhatsAppModuleProps
         const data = await res.json();
         if (data.qr_data_url) {
           setQrBase64(data.qr_data_url);
+          setGatewayError(null);
+        } else if (data.error) {
+          setGatewayError(data.error);
         }
       }
     } catch (e) {
       console.error("Failed to fetch WhatsApp QR code:", e);
+      setGatewayError("Gateway service offline on port 3001.");
     }
   };
 
@@ -170,9 +183,9 @@ export function WhatsAppModule({ companyName = "VyaperiX" }: WhatsAppModuleProps
 
   useEffect(() => {
     fetchStatus();
-    const interval = setInterval(fetchStatus, 10000);
+    const interval = setInterval(fetchStatus, isConnected ? 10000 : 4000);
     return () => clearInterval(interval);
-  }, []);
+  }, [isConnected]);
 
   const isConnected = Boolean(statusData?.connected);
 
@@ -276,13 +289,42 @@ export function WhatsAppModule({ companyName = "VyaperiX" }: WhatsAppModuleProps
                 Open WhatsApp &rarr; Settings &rarr; Linked Devices &rarr; Link a Device
               </p>
 
-              <div className="p-4 bg-white border border-ink/20 inline-block shadow-sm">
+              <div className="p-4 bg-white border border-ink/20 inline-block shadow-sm rounded-lg">
                 {qrBase64 ? (
-                  <img src={qrBase64} alt="WhatsApp QR Code" className="w-56 h-56 mx-auto block" />
+                  <div className="space-y-2">
+                    <img src={qrBase64} alt="WhatsApp QR Code" className="w-56 h-56 mx-auto block" />
+                    <span className="font-mono text-[10px] text-muted-foreground block">
+                      Auto-refreshes every few seconds
+                    </span>
+                  </div>
+                ) : gatewayError ? (
+                  <div className="w-56 h-56 flex flex-col items-center justify-center p-3 gap-2 text-center">
+                    <span className="font-mono text-[11px] font-bold text-red-500 uppercase">
+                      [Gateway Offline]
+                    </span>
+                    <p className="font-mono text-[10px] text-muted-foreground leading-tight">
+                      Port 3001 WhatsApp server is offline.
+                    </p>
+                    <code className="text-[10px] bg-secondary px-2 py-1 border border-ink/10 font-mono text-ink">
+                      npm run dev:whatsapp
+                    </code>
+                    <button
+                      onClick={fetchStatus}
+                      className="mt-1 px-3 py-1 text-[11px] font-mono border border-ink/20 hover:border-violet text-ink hover:text-violet transition-colors flex items-center gap-1 cursor-pointer"
+                    >
+                      <RefreshCw className="w-3 h-3" /> Retry Connection
+                    </button>
+                  </div>
                 ) : (
                   <div className="w-56 h-56 flex flex-col items-center justify-center gap-2 text-muted-foreground">
                     <RefreshCw className="w-8 h-8 animate-spin text-violet" />
                     <span className="font-mono text-xs">Generating QR...</span>
+                    <button
+                      onClick={fetchStatus}
+                      className="text-[10px] font-mono text-violet hover:underline mt-1 cursor-pointer"
+                    >
+                      Force Check
+                    </button>
                   </div>
                 )}
               </div>
