@@ -619,20 +619,13 @@ async def approve_and_send_whatsapp(
         requirements=requirements_to_send,
     )
 
-    if not wa_res.get("success"):
+    if wa_res.get("success"):
+        updates["whatsapp_status"] = "sent"
+        updates["whatsapp_sent_at"] = datetime.now(timezone.utc).isoformat()
+    else:
         updates["whatsapp_status"] = "failed"
         updates["whatsapp_error"] = wa_res.get("error")
-        await db.update_calendar_event(event_id, updates)
-        return {
-            "success": False,
-            "error": f"Booking confirmed, but WhatsApp failed to send: {wa_res.get('error')}",
-            "event_id": event_id,
-            "meet_url": meet_url,
-            "calendly_link": calendly_link,
-        }
-
-    updates["whatsapp_status"] = "sent"
-    updates["whatsapp_sent_at"] = datetime.now(timezone.utc).isoformat()
+        logger.warning(f"WhatsApp dispatch skipped/failed for booking {event_id}: {wa_res.get('error')}")
 
     # ── SMS notification with Calendly link ──────────────────────────────────
     try:
