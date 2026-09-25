@@ -464,30 +464,60 @@ async def dispatch_outbound_call(
         )
 
 
-async def resolve_business_dossier(business_name: str, extra_context: Optional[dict] = None) -> str:
+async def resolve_business_dossier(business_name: str, extra_context: Optional[dict] = None) -> tuple[str, dict]:
     """
     Resolve and synthesize deep business intelligence for the voice agent:
-    1. Extracts any explicitly provided extra_context.
-    2. Automatically looks up the latest scraped business intelligence report in MongoDB `reports`.
-    3. Injects authoritative facts on:
-       - Business & Founder (Om Rashiya, IIT Mandi credentials, Software Engineer & AI Specialist)
-       - Products / Offerings (Full-stack web apps, financial web portals, custom software)
-       - Tech stack & integration capabilities
-       - High-level pricing and consultation approach
+    1. Extracts any explicitly provided extra_context (including report_id and user_id).
+    2. Automatically looks up the matching business intelligence report in MongoDB `reports`.
+    3. Dynamically extracts:
+       - Company Name & Brand Identity
+       - Business Overview & Summary
+       - Founder & Executive Leadership
+       - Products / Offerings / Services
+       - Value propositions & differentiators
     """
     report = None
     try:
         mongo = db.get_mongo_db()
         if mongo is not None:
             clean_bname = (business_name or "").strip()
-            if clean_bname:
+            user_id = (extra_context and extra_context.get("user_id")) or None
+            report_id = (extra_context and extra_context.get("report_id")) or None
+
+            # 1. Exact report ID match if specified
+            if report_id:
+                report = await mongo["reports"].find_one({"_id": str(report_id)})
+                if not report:
+                    report = await mongo["reports"].find_one({"id": str(report_id)})
+
+            # 2. Match by user_id and business name
+            if not report and user_id and clean_bname:
+                report = await mongo["reports"].find_one({
+                    "user_id": str(user_id),
+                    "$or": [
+                        {"company_name": {"$regex": clean_bname, "$options": "i"}},
+                        {"business_name": {"$regex": clean_bname, "$options": "i"}},
+                        {"raw_profile.company_name": {"$regex": clean_bname, "$options": "i"}},
+                        {"analysis.company_name": {"$regex": clean_bname, "$options": "i"}},
+                    ]
+                })
+
+            # 3. Match by user_id latest report
+            if not report and user_id:
+                report = await mongo["reports"].find_one({"user_id": str(user_id)}, sort=[("created_at", -1)])
+
+            # 4. Global match by business name
+            if not report and clean_bname:
                 report = await mongo["reports"].find_one({
                     "$or": [
                         {"company_name": {"$regex": clean_bname, "$options": "i"}},
                         {"business_name": {"$regex": clean_bname, "$options": "i"}},
                         {"raw_profile.company_name": {"$regex": clean_bname, "$options": "i"}},
+                        {"analysis.company_name": {"$regex": clean_bname, "$options": "i"}},
                     ]
                 })
+
+            # 5. Fallback to latest global report if none matched
             if not report:
                 report = await mongo["reports"].find_one(sort=[("created_at", -1)])
     except Exception as e:
@@ -498,11 +528,11 @@ async def resolve_business_dossier(business_name: str, extra_context: Optional[d
 
     company = (
         (extra_context and extra_context.get("company_name"))
-        or (report and report.get("company_name"))
+        or (report and (report.get("company_name") or report.get("business_name")))
         or analysis.get("company_name")
         or raw.get("company_name")
         or business_name
-        or "OM OS / VyaperiX"
+        or "Our Enterprise"
     )
 
     summary = (
@@ -510,34 +540,65 @@ async def resolve_business_dossier(business_name: str, extra_context: Optional[d
         or analysis.get("one_line_summary")
         or (analysis.get("executive_summary") or {}).get("core_thesis")
         or raw.get("business_description")
-        or "Premier custom full-stack web applications and financial web portals."
+        or f"Professional products, software solutions, and services offered by {company}."
     )
 
     products = (extra_context and extra_context.get("products_services")) or analysis.get("products_services") or []
     if isinstance(products, list) and len(products) > 0:
-        prod_text = "; ".join(str(p) for p in products[:5])
+        prod_items = []
+        for p in products[:5]:
+            if isinstance(p, dict):
+                p_n = p.get("name") or p.get("title") or ""
+                p_d = p.get("description") or p.get("differentiator") or ""
+                prod_items.append(f"{p_n}: {p_d}".strip(": "))
+            elif isinstance(p, str):
+                prod_items.append(p.strip())
+        prod_text = "; ".join(item for item in prod_items if item)
     else:
-        prod_text = "Custom Full-Stack Web Applications (React, Next.js, FastAPI, Node.js, Python, MongoDB); Financial Portals & Dashboards (Real-time analytics, portfolio tracking, secure payment gateways, role-based auth); Business Automation & AI Systems (Voice AI SDRs, automated CRM pipelines, RAG document search)"
+        prod_text = f"Full suite of high-performance products, client solutions, and commercial services by {company}."
 
     value_props = (extra_context and extra_context.get("value_propositions")) or analysis.get("value_proposition") or []
     if isinstance(value_props, list) and len(value_props) > 0:
         vp_text = "; ".join(str(v) for v in value_props[:4])
+    elif isinstance(value_props, str) and value_props.strip():
+        vp_text = value_props.strip()
     else:
-        vp_text = "High-performance architecture with sub-second page loads; Direct founder-led engineering; Responsive phone-first design; Enterprise-grade security and clean code"
+        vp_text = "Industry-leading quality, high-reliability execution, and dedicated client success."
 
-    founder_info = "Founder & Chief Architect: Om Rashiya — Software Engineer & AI/ML Specialist with IIT Mandi credentials. Experienced in architecting mobile-first dashboards, high-frequency financial portals, responsive web platforms, and intelligent business workflows."
+    # Dynamic Founder / Leadership resolution
+    founder_info = None
+    if extra_context and (extra_context.get("founder") or extra_context.get("leadership")):
+        founder_info = str(extra_context.get("founder") or extra_context.get("leadership"))
+    elif analysis.get("leadership") or analysis.get("founder"):
+        founder_info = str(analysis.get("leadership") or analysis.get("founder"))
+    elif raw.get("founder") or raw.get("leadership"):
+        founder_info = str(raw.get("founder") or raw.get("leadership"))
+    else:
+        combined_text = (company + " " + str(summary)).lower()
+        if "rashiya" in combined_text or "omos" in combined_text:
+            founder_info = "Founder & Chief Architect: Om Rashiya — Software Engineer & AI/ML Specialist with IIT Mandi credentials."
+        else:
+            founder_info = f"Executive Leadership and engineering management team of {company}."
 
-    pricing_info = "Consultation & Initial Scoping: 100% complimentary briefing session. Custom pricing quoted transparently based on client specifications; fast-turnaround agile sprint delivery."
+    pricing_info = "Consultation & Scoping: 100% complimentary briefing session. Custom pricing quoted transparently based on client specifications."
 
     dossier_lines = [
         f"COMPANY NAME: {company}",
         f"BUSINESS OVERVIEW: {summary}",
-        f"FOUNDER & CREDENTIALS: {founder_info}",
+        f"FOUNDER & LEADERSHIP: {founder_info}",
         f"CORE OFFERINGS & SERVICES: {prod_text}",
         f"VALUE PROPOSITIONS & STRENGTHS: {vp_text}",
         f"PRICING & ENGAGEMENT: {pricing_info}",
     ]
-    return "\n".join(f"- {line}" for line in dossier_lines)
+    dossier_str = "\n".join(f"- {line}" for line in dossier_lines)
+    meta = {
+        "company": company,
+        "founder_info": founder_info,
+        "prod_text": prod_text,
+        "summary": summary,
+        "report_id": str(report.get("_id") or report.get("id") or "") if report else "",
+    }
+    return dossier_str, meta
 
 
 # ─────────────────────────── Live Vapi AI Outbound Call ────────────────
@@ -599,7 +660,9 @@ async def dispatch_vapi_call(
         lang_instruction = "IMPORTANT LANGUAGE INSTRUCTION: You must automatically detect whether the customer is speaking English, Hindi, or Gujarati, and seamlessly switch to respond fluently in their language."
         first_message = f"Hello {customer_name}, this is Sarah calling from {business_name} regarding {call_reason}. Do you have a brief moment to connect?"
 
-    company_knowledge_block = await resolve_business_dossier(business_name=business_name, extra_context=extra_context)
+    company_knowledge_block, dossier_meta = await resolve_business_dossier(business_name=business_name, extra_context=extra_context)
+    founder_statement = dossier_meta.get("founder_info") or f"Executive leadership and engineering team of {business_name}"
+    services_statement = dossier_meta.get("prod_text") or f"the comprehensive suite of products and services offered by {business_name}"
 
     system_prompt = (
         f"You are a professional, articulate, and highly intelligent AI Sales Development Representative calling on behalf of {business_name}.\n"
@@ -619,9 +682,9 @@ async def dispatch_vapi_call(
         f"   - STRICTLY FORBIDDEN: NEVER use masculine verbs ('गया', 'सकता', 'रहा') for yourself.\n\n"
         f"2. HIGH INTELLECT & CONSULTATIVE ELOQUENCE:\n"
         f"   - DO NOT repeat repetitive robotic formulas like 'समझ गया रमेश धन्यवाद' on every turn. Vary your language naturally like an intelligent human advisor.\n"
-        f"   - When asked about the founder or company owner: State clearly that the founder is Om Rashiya, a Software Engineer & AI/ML Specialist with IIT Mandi credentials who architects custom web and finance portals.\n"
-        f"   - When asked about services: Confidently describe our custom full-stack web applications and financial web portals.\n"
-        f"   - Never claim 'I do not have this information' for basic business facts or founder credentials.\n"
+        f"   - When asked about the founder or company leadership: State clearly and accurately that our leadership is: {founder_statement}.\n"
+        f"   - When asked about services or capabilities: Confidently describe our offerings based on: {services_statement[:250]}.\n"
+        f"   - Never claim 'I do not have this information' for basic business facts or services outlined in your dossier.\n"
         f"   - Keep spoken turns concise (1 to 2 articulate sentences) so the conversation flows naturally.\n\n"
         f"3. DE-ESCALATION & ABUSE PROTOCOL:\n"
         f"   - If the caller expresses frustration or impatience, acknowledge their concern calmly and professionally ('I completely understand your frustration, let me help you with this right away.').\n"
@@ -630,7 +693,7 @@ async def dispatch_vapi_call(
         f"     * Second time / persistent abuse: Politely terminate the call: 'Since we are unable to have a respectful conversation, I will conclude the call now. Thank you.' and end the call immediately.\n"
         f"     * NEVER trade insults, argue, or passively accept foul language.\n\n"
         f"4. OBJECTIVE:\n"
-        f"   - Address the customer's inquiries intelligently, build confidence in our engineering capabilities, and secure a 10-15 minute demo or consultation meeting at their preferred day and time."
+        f"   - Address the customer's inquiries intelligently, build confidence in our capabilities, and secure a 10-15 minute demo or consultation meeting at their preferred day and time."
     )
 
     provider = creds.get("voice_provider", "sarvam")

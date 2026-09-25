@@ -138,21 +138,60 @@ def compile_meeting_briefing(analysis: dict, raw_profile: Optional[dict] = None)
     payload_dict = {
         "analysis": analysis,
     }
-    if raw_profile:
-        payload_dict["website_metadata"] = {
-            "source_url": raw_profile.get("source_url") or "https://rashiyaom.netlify.app",
-            "company_name": raw_profile.get("company_name") or analysis.get("company_name") or "Rashiya Om / OmOS",
-            "business_description": raw_profile.get("business_description") or "Phone-first portfolio & custom software development services",
-            "founder": "Om Rashiya (Software Engineer & AI/ML Specialist, IIT Mandi credentials)",
-            "key_page_titles": [p.get("title") for p in raw_profile.get("pages", [])[:5] if p.get("title")],
-        }
-    else:
-        payload_dict["website_metadata"] = {
-            "source_url": "https://rashiyaom.netlify.app",
-            "company_name": analysis.get("company_name") or "Rashiya Om / OmOS",
-            "founder": "Om Rashiya (Software Engineer & AI/ML Specialist, IIT Mandi credentials)",
-            "core_offerings": "Custom Full-Stack Web Applications, Finance Web Portals, Dashboards, AI SDRs",
-        }
+
+    # Dynamically extract company identity and website details from the specific report
+    company_name = (
+        (raw_profile and raw_profile.get("company_name"))
+        or (analysis and analysis.get("company_name"))
+        or "Company"
+    )
+    source_url = (
+        (raw_profile and (raw_profile.get("source_url") or raw_profile.get("website_url")))
+        or (analysis and analysis.get("source_url"))
+        or ""
+    )
+    business_description = (
+        (raw_profile and raw_profile.get("business_description"))
+        or (analysis and (analysis.get("one_line_summary") or (analysis.get("executive_summary") or {}).get("core_thesis")))
+        or ""
+    )
+
+    # Resolve leadership / founders dynamically:
+    # If explicitly in raw profile or analysis, use that; otherwise if company is OmOS/Rashiya, credit Om;
+    # otherwise refer to the leadership & engineering team of the specific company.
+    founder_leadership = (
+        (raw_profile and (raw_profile.get("founder") or raw_profile.get("leadership")))
+        or (analysis and (analysis.get("leadership") or analysis.get("founder")))
+    )
+    if not founder_leadership:
+        combined_text = (company_name + " " + source_url).lower()
+        if "rashiya" in combined_text or "omos" in combined_text:
+            founder_leadership = "Om Rashiya (Software Engineer & AI/ML Specialist, IIT Mandi credentials)"
+        else:
+            founder_leadership = f"Executive Leadership & Management Team of {company_name}"
+
+    extracted_products = []
+    if analysis and analysis.get("products_services"):
+        for prod in analysis.get("products_services", [])[:6]:
+            if isinstance(prod, dict):
+                p_name = prod.get("name") or prod.get("title") or ""
+                p_desc = prod.get("description") or prod.get("differentiator") or ""
+                extracted_products.append(f"{p_name}: {p_desc}".strip(": "))
+            elif isinstance(prod, str):
+                extracted_products.append(prod)
+
+    page_titles = []
+    if raw_profile and raw_profile.get("pages"):
+        page_titles = [p.get("title") for p in raw_profile.get("pages", [])[:6] if p.get("title")]
+
+    payload_dict["website_metadata"] = {
+        "company_name": company_name,
+        "source_url": source_url,
+        "business_description": business_description,
+        "leadership_or_founder": founder_leadership,
+        "core_offerings": extracted_products if extracted_products else "Comprehensive products, solutions, and enterprise services",
+        "key_page_titles": page_titles,
+    }
     user_message_content = json.dumps(payload_dict, indent=2)
 
     last_error: Optional[Exception] = None

@@ -121,13 +121,16 @@ export function VoiceFleetModule({
 
   const extraContext = analysis
     ? {
-        summary: analysis.one_line_summary || analysis.executive_summary || "",
+        company_name: effectiveCompanyName,
+        user_id: user?.id,
+        report_id: (analysis as any)?.id || (analysis as any)?._id || (analysis as any)?.report_id,
+        summary: analysis.one_line_summary || (typeof analysis.executive_summary === "string" ? analysis.executive_summary : analysis.executive_summary?.core_thesis) || "",
         value_propositions: analysis.value_propositions || [],
         products_services: analysis.products_services || [],
         pain_points_solved: analysis.pain_points_solved || [],
         target_personas: analysis.target_buyer_personas || [],
       }
-    : undefined;
+    : (user?.id ? { user_id: user?.id, company_name: effectiveCompanyName } : undefined);
 
   const getAuthHeaders = () => {
     return getApiAuthHeaders(session?.access_token);
