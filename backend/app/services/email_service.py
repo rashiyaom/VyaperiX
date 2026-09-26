@@ -366,6 +366,7 @@ def _render_meeting_html(
     custom_message: Optional[str] = None,
     employee_name: Optional[str] = None,
     employee_email: Optional[str] = None,
+    calendly_link: Optional[str] = None,
 ) -> str:
     """Generate high-impact, responsive HTML meeting confirmation email."""
     year = datetime.now().year
@@ -406,6 +407,20 @@ def _render_meeting_html(
       </tr>
     </table>
     """ if custom_message else ""
+
+    calendly_box = f"""
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin: 0 0 16px 0; background-color: rgba(59, 130, 246, 0.08); border: 1px dashed rgba(59, 130, 246, 0.4); border-radius: 8px; padding: 12px 16px;">
+      <tr>
+        <td align="center">
+          <div style="font-size: 11px; font-weight: 700; color: #93c5fd; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Calendly Self-Scheduling & Alternative Slots:</div>
+          <div style="font-size: 12px; color: #e4e4e7; margin-bottom: 6px;">Prefer a different date or time that fits your calendar?</div>
+          <a href="{calendly_link}" target="_blank" style="display: inline-block; font-size: 12px; font-weight: 700; color: #38bdf8; text-decoration: underline;">
+            📅 Open Calendly Scheduling Page →
+          </a>
+        </td>
+      </tr>
+    </table>
+    """ if calendly_link else ""
 
     agenda_html = f"""
     <tr style="border-top: 1px solid #27272a;">
@@ -529,6 +544,8 @@ def _render_meeting_html(
               <p style="font-size: 11px; color: #71717a; text-align: center; margin: 0 0 16px 0;">
                 Direct Meeting Room Link: <a href="{safe_link}" target="_blank" style="color: #38bdf8; text-decoration: underline;">{safe_link}</a>
               </p>
+
+              {calendly_box}
 
               <div style="background-color: rgba(24, 27, 38, 0.7); border-left: 3px solid #7c3aed; padding: 10px 14px; border-radius: 4px;">
                 <p style="font-size: 11px; line-height: 1.5; color: #a1a1aa; margin: 0;">
@@ -755,6 +772,7 @@ async def send_meeting_confirmation_broadcast(
     employee_name: Optional[str] = None,
     user_id: Optional[str] = None,
     source: str = "calendar_confirmation",
+    calendly_link: Optional[str] = None,
 ) -> dict:
     """
     Dedicated enterprise broadcast for calendar meeting confirmations:
@@ -784,6 +802,7 @@ async def send_meeting_confirmation_broadcast(
             custom_message=custom_message,
             employee_name=employee_name,
             employee_email=employee_email,
+            calendly_link=calendly_link,
         )
         cust_text_lines = [
             f"Hello {lead_name}!",
@@ -797,6 +816,9 @@ async def send_meeting_confirmation_broadcast(
             cust_text_lines.extend(["", f"Note from {comp_display}:\n{custom_message}"])
         elif agenda:
             cust_text_lines.extend(["", f"Agenda:\n{agenda}"])
+
+        if calendly_link:
+            cust_text_lines.extend(["", f"📅 Reschedule / Calendly Link: {calendly_link}"])
 
         cust_text_lines.extend([
             "",
@@ -830,6 +852,7 @@ async def send_meeting_confirmation_broadcast(
             custom_message=custom_message,
             employee_name=employee_name,
             employee_email=clean_emp_email,
+            calendly_link=calendly_link,
         )
         emp_text_lines = [
             f"MEETING CONFIRMED FOR {formatted_time.upper()}",
@@ -844,6 +867,9 @@ async def send_meeting_confirmation_broadcast(
             emp_text_lines.extend(["", f"Custom Notes / Agenda:\n{custom_message}"])
         elif agenda:
             emp_text_lines.extend(["", f"Discussion Agenda:\n{agenda}"])
+
+        if calendly_link:
+            emp_text_lines.extend(["", f"Calendly Self-Scheduling Link: {calendly_link}"])
 
         emp_text_lines.extend([
             "",

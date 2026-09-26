@@ -122,6 +122,7 @@ def send_meeting_sms(
     send_to_prospect: bool = True,
     source: str = "manual",
     company_name: Optional[str] = None,
+    calendly_link: Optional[str] = None,
 ) -> dict:
     """
     Send meeting booking SMS to sales representative and optionally to the prospect.
@@ -135,6 +136,10 @@ def send_meeting_sms(
     results: Dict[str, Any] = {"rep": None, "prospect": None}
     comp = company_name or "VyaperiX"
 
+    combined_link = meeting_link
+    if calendly_link and calendly_link.strip() and calendly_link.strip() != meeting_link.strip():
+        combined_link = f"{meeting_link} | Cal: {calendly_link.strip()}"
+
     if source == "ai_call":
         prefix = f"[{comp}] Hot Lead Booked! "
         middle = f" agreed to a meeting at {meeting_time}. Link: "
@@ -147,7 +152,7 @@ def send_meeting_sms(
             prefix=prefix,
             lead_name=lead_name,
             middle=middle,
-            meeting_link=meeting_link,
+            meeting_link=combined_link,
             max_len=155,
         )
         try:
@@ -161,7 +166,7 @@ def send_meeting_sms(
             prefix="Hi ",
             lead_name=lead_name,
             middle=f", your meeting with {comp} is confirmed for {meeting_time}. Link: ",
-            meeting_link=meeting_link,
+            meeting_link=combined_link,
             max_len=155,
         )
         try:

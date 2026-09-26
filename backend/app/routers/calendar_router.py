@@ -733,10 +733,11 @@ async def approve_and_confirm_meeting(
                 prospect_phone=target_phone,
                 lead_name=customer_name,
                 meeting_time=formatted_time,
-                meeting_link=calendly_link or meet_url,
+                meeting_link=meet_url or calendly_link,
                 send_to_prospect=bool(target_phone),
                 source="approved_booking",
                 company_name=company_name,
+                calendly_link=calendly_link,
             )
             updates["sms_status"] = "sent" if (sms_res.get("prospect") or {}).get("status") in ("sent", "mocked") else "failed"
         except Exception as sms_err:
@@ -759,7 +760,7 @@ async def approve_and_confirm_meeting(
                 customer_email=target_email,
                 lead_name=customer_name,
                 meeting_time=start_time,
-                meeting_link=calendly_link or meet_url,
+                meeting_link=meet_url or calendly_link,
                 title=event.get("title") or "Confirmed Discovery Session",
                 agenda=agenda,
                 customer_phone=target_phone,
@@ -768,6 +769,7 @@ async def approve_and_confirm_meeting(
                 employee_name=employee_name,
                 user_id=event.get("user_id"),
                 source="approved_booking",
+                calendly_link=calendly_link,
             )
             cust_status = (email_res.get("customer") or {}).get("status")
             emp_status = (email_res.get("employee") or {}).get("status")

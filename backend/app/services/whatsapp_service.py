@@ -280,20 +280,23 @@ async def send_meeting_confirmation_with_calendly(
         "",
     ]
 
-    if calendly_link:
+    lines += [
+        f"📅 *Date & Time:* {formatted_time}",
+    ]
+
+    if meet_url:
         lines += [
-            "📅 *Book Your Preferred Time Slot:*",
-            f"{calendly_link}",
-            "_(Tap the link above to pick a time that works best for you — no app required!)_",
-            "",
-            f"📌 *Proposed Slot:* {formatted_time}",
-        ]
-    else:
-        lines += [
-            f"📅 *Date & Time:* {formatted_time}",
             "🎥 *Live Video Meeting Room:*",
             f"{meet_url}",
-            "_(Click link above to join from mobile or PC. No app download required!)_",
+            "_(Click link above to join from mobile or PC. No app download or account required!)_",
+        ]
+
+    if calendly_link:
+        lines += [
+            "",
+            "🔗 *Calendly Self-Scheduling Link:*",
+            f"{calendly_link}",
+            "_(Prefer another slot or need to reschedule? Tap the Calendly link above anytime!)_",
         ]
 
     if custom_message:
