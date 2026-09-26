@@ -109,7 +109,7 @@ export const Route = createFileRoute("/dashboard")({
   component: DashboardPage,
 });
 
-const API_BASE = (import.meta.env["VITE_SCRAPER_API_BASE"] as string) || "http://127.0.0.1:8000";
+const API_BASE = getApiBase();
 
 async function safeApiFetch(endpoint: string, init?: RequestInit): Promise<Response> {
   const base = getApiBase();
@@ -130,10 +130,11 @@ async function safeApiFetch(endpoint: string, init?: RequestInit): Promise<Respo
         console.error("[safeApiFetch] Fallback also failed:", fallbackErr);
       }
     }
-    if (primary.includes(":8001")) {
-      const fallback8000 = primary.replace(":8001", ":8000");
+    if (primary.includes(":8000")) {
       try {
-        return await fetch(fallback8000, init);
+        const cloudUrl = primary.replace(/^http:\/\/[^/]+/, "https://backend-production-4ba21.up.railway.app");
+        const cloudRes = await fetch(cloudUrl, init);
+        return cloudRes;
       } catch {}
     }
     throw err;
@@ -2115,7 +2116,7 @@ function DashboardPage() {
         return;
       }
       const emailParam = userEmail ? `&user_email=${encodeURIComponent(userEmail)}` : "";
-      const url = `${API_BASE}/api/reports?user_id=${encodeURIComponent(validUserId)}${emailParam}`;
+      const url = `${getApiBase()}/api/reports?user_id=${encodeURIComponent(validUserId)}${emailParam}`;
       const headers: Record<string, string> = {};
       const token = session?.access_token || (typeof window !== "undefined" ? localStorage.getItem("vyepari_x_auth_token") : null);
       if (token) {

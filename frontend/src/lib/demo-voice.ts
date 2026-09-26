@@ -7,11 +7,9 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { getApiBase } from "./api";
 
-const API_BASE = ((import.meta.env["VITE_SCRAPER_API_BASE"] as string) || "http://localhost:8000").replace(
-  /\/$/,
-  "",
-);
+const API_BASE = getApiBase();
 
 export type DemoGender = "female" | "male";
 

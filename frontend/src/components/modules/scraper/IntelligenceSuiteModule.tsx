@@ -72,8 +72,9 @@ import {
   type SWOTAnalysis,
   type TimelinePhase,
 } from "@/components/scraper/ReportComponents";
+import { getApiBase } from "@/lib/api";
 
-const API_BASE = (import.meta.env["VITE_SCRAPER_API_BASE"] as string) || "http://localhost:8000";
+const API_BASE = getApiBase();
 
 /* ─── Types ─── */
 export interface RecentReport {

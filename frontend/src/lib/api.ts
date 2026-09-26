@@ -5,14 +5,34 @@
 
 export function getApiBase(): string {
   const env = import.meta.env as Record<string, any>;
-  const isLocal = typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
-  const defaultFallback = isLocal ? "http://localhost:8000" : "https://backend-production-4ba21.up.railway.app";
-  const base =
-    env["VITE_BACKEND_URL"] ||
-    env["VITE_SCRAPER_API_BASE"] ||
-    env["VITE_API_BASE_URL"] ||
-    defaultFallback;
-  return String(base).replace(/\/$/, "");
+  if (typeof window === "undefined") {
+    const raw = env["VITE_BACKEND_URL"] || env["VITE_SCRAPER_API_BASE"] || "http://127.0.0.1:8000";
+    return String(raw).replace(/\/$/, "");
+  }
+
+  const hostname = window.location.hostname;
+  const isLocalhost = hostname === "localhost" || hostname === "127.0.0.1";
+
+  // When running in browser on developer machine
+  if (isLocalhost) {
+    const localBase = env["VITE_BACKEND_URL"] || env["VITE_SCRAPER_API_BASE"] || "http://localhost:8000";
+    return String(localBase).replace(/\/$/, "");
+  }
+
+  // When accessed from another device on the same local Wi-Fi network (e.g. 192.168.x.x, 10.x.x.x, or .local)
+  const isLan = /^192\.168\.|^10\.|^172\.(1[6-9]|2[0-9]|3[0-1])\.|\.local$/.test(hostname);
+  if (isLan) {
+    return `http://${hostname}:8000`;
+  }
+
+  // When running on production, Vercel, Railway, Netlify, or custom domain
+  const prodUrl = env["VITE_PROD_BACKEND_URL"] || "https://backend-production-4ba21.up.railway.app";
+  const explicit = env["VITE_BACKEND_URL"] || env["VITE_SCRAPER_API_BASE"];
+  if (explicit && (explicit.startsWith("https://") || (!explicit.includes("localhost") && !explicit.includes("127.0.0.1")))) {
+    return String(explicit).replace(/\/$/, "");
+  }
+
+  return String(prodUrl).replace(/\/$/, "");
 }
 
 export function getStoredToken(): string | null {
@@ -73,9 +93,21 @@ export async function apiFetch(
         const fallbackRes = await fetch(fallbackUrl, mergedOptions);
         return fallbackRes;
       } catch {
+        // Fall through to Railway cloud fallback
+      }
+    }
+
+    // Secondary fallback: if local server unreachable from another device, try Railway backend
+    if (primary.includes(":8000")) {
+      try {
+        const cloudUrl = primary.replace(/^http:\/\/[^/]+/, "https://backend-production-4ba21.up.railway.app");
+        const cloudRes = await fetch(cloudUrl, mergedOptions);
+        return cloudRes;
+      } catch {
         // Fall through to throw original error
       }
     }
+
     throw err;
   }
 }

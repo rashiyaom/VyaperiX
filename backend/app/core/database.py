@@ -79,8 +79,8 @@ def get_mongo_client() -> AsyncIOMotorClient:
     if _mongo_client is None:
         uri = os.getenv("MONGODB_URI", MONGODB_URI).strip()
         kwargs: Dict[str, Any] = {
-            "serverSelectionTimeoutMS": 4000,
-            "connectTimeoutMS": 4000,
+            "serverSelectionTimeoutMS": 10000,
+            "connectTimeoutMS": 10000,
         }
         if "mongodb+srv://" in uri or "ssl=true" in uri.lower():
             try:

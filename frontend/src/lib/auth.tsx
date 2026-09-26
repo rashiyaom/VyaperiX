@@ -2,8 +2,7 @@ import React, { createContext, useContext, useEffect, useState } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import { useGoogleLogin } from "@react-oauth/google";
 import { supabase } from "./supabase";
-
-const API_BASE = (import.meta.env["VITE_SCRAPER_API_BASE"] as string) || "http://127.0.0.1:8000";
+import { getApiBase } from "./api";
 
 export interface UserProfile {
   id: string;
@@ -60,6 +59,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Fetch or sync user profile from MongoDB
   const fetchProfile = async (currentUser: User, explicitToken?: string) => {
+    const apiBase = getApiBase();
     try {
       const token = explicitToken || session?.access_token || localStorage.getItem("vyepari_x_auth_token");
       const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -68,7 +68,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       // Query profile directly from MongoDB backend
-      const res = await fetch(`${API_BASE}/api/profile?user_id=${currentUser.id}`, {
+      const res = await fetch(`${apiBase}/api/profile?user_id=${currentUser.id}`, {
         headers,
       });
 
@@ -104,7 +104,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (token) {
         headers["Authorization"] = `Bearer ${token}`;
       }
-      await fetch(`${API_BASE}/api/profile?user_id=${currentUser.id}`, {
+      await fetch(`${apiBase}/api/profile?user_id=${currentUser.id}`, {
         method: "PUT",
         headers,
         body: JSON.stringify(fallbackProfile),
@@ -117,8 +117,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Helper to sync Google user with FastAPI /api/auth/me (resolving real Supabase UUID & profile)
   const syncGoogleUserWithBackend = async (token: string, userInfo: any) => {
     try {
-      const API_BASE = (import.meta.env["VITE_SCRAPER_API_BASE"] as string) || "http://localhost:8000";
-      const res = await fetch(`${API_BASE}/api/auth/me`, {
+      const apiBase = getApiBase();
+      const res = await fetch(`${apiBase}/api/auth/me`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -348,7 +348,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       if (token) headers["Authorization"] = `Bearer ${token}`;
 
-      await fetch(`${API_BASE}/api/profile?user_id=${user.id}`, {
+      const apiBase = getApiBase();
+      await fetch(`${apiBase}/api/profile?user_id=${user.id}`, {
         method: "PUT",
         headers,
         body: JSON.stringify({ onboarding_completed: true }),
@@ -366,7 +367,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       if (token) headers["Authorization"] = `Bearer ${token}`;
 
-      await fetch(`${API_BASE}/api/profile?user_id=${user.id}`, {
+      const apiBase = getApiBase();
+      await fetch(`${apiBase}/api/profile?user_id=${user.id}`, {
         method: "PUT",
         headers,
         body: JSON.stringify(updates),
