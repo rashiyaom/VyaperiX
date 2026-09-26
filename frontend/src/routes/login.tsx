@@ -577,22 +577,22 @@ function LoginPage() {
             <>
               {/* Active Session Detected Banner */}
               {session && user && (
-                <div className="mt-4 mb-3 border border-lime/40 bg-lime/10 p-4 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-sm">
-                  <div className="flex items-center gap-2.5">
+                <div className="mt-4 mb-3 border border-lime/40 bg-lime/10 p-3.5 sm:p-4 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm overflow-hidden">
+                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
                     <span className="w-2.5 h-2.5 rounded-full bg-lime animate-pulse shrink-0" />
-                    <div>
-                      <span className="font-mono text-[11px] font-bold text-lime-foreground dark:text-lime uppercase tracking-wider">
+                    <div className="min-w-0 flex-1">
+                      <span className="font-mono text-[11px] font-bold text-lime-foreground dark:text-lime uppercase tracking-wider block">
                         Active Command Session
                       </span>
-                      <p className="text-xs text-muted-foreground">
-                        Signed in as <strong className="text-ink">{user.email}</strong>
+                      <p className="text-xs text-muted-foreground truncate" title={user.email || ""}>
+                        Signed in as <strong className="text-ink font-semibold">{user.email}</strong>
                       </p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2 w-full sm:w-auto">
+                  <div className="flex items-center gap-2 w-full sm:w-auto shrink-0">
                     <Link
                       to={profile && !profile.onboarding_completed ? "/onboarding" : "/dashboard"}
-                      className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-ink text-paper label-mono text-xs font-bold hover:bg-violet hover:text-white transition-all shadow-sm"
+                      className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-ink text-paper label-mono text-xs font-bold hover:bg-violet hover:text-white transition-all shadow-sm whitespace-nowrap"
                     >
                       Open Dashboard <ArrowUpRight className="w-3.5 h-3.5" />
                     </Link>
@@ -603,7 +603,7 @@ function LoginPage() {
                         setTab("Signup");
                         setSuccessMessage("Signed out. You can now create a new account or start a fresh trial.");
                       }}
-                      className="flex-1 sm:flex-none inline-flex items-center justify-center px-3 py-1.5 border border-ink/30 bg-card hover:bg-destructive hover:text-white label-mono text-xs font-bold transition-all cursor-pointer"
+                      className="flex-1 sm:flex-initial inline-flex items-center justify-center px-3 py-1.5 border border-ink/30 bg-card hover:bg-destructive hover:text-white label-mono text-xs font-bold transition-all cursor-pointer whitespace-nowrap"
                     >
                       Sign Out
                     </button>
