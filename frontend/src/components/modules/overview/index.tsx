@@ -31,7 +31,9 @@ import {
   ArrowUpRight,
   ChevronRight,
   Wifi,
+  Globe,
 } from "lucide-react";
+import { RegionalRankingTile } from "../regional/RegionalRankingTile";
 import {
   ResponsiveContainer,
   AreaChart,
@@ -173,7 +175,13 @@ const tooltipLabelStyle: React.CSSProperties = {
 };
 
 /* ─── Main Component ─── */
-export function OverviewDashboard({ onNavigate }: { onNavigate?: (mod: string) => void }) {
+export function OverviewDashboard({
+  onNavigate,
+  industry = "",
+}: {
+  onNavigate?: ((mod: string) => void) | undefined;
+  industry?: string | undefined;
+}) {
   const { user, session } = useAuth();
   const [reports, setReports] = useState<any[]>([]);
   const [leads, setLeads] = useState<any[]>([]);
@@ -400,6 +408,14 @@ export function OverviewDashboard({ onNavigate }: { onNavigate?: (mod: string) =
       value: `${leads.length} Leads`,
       status: leads.length > 0 ? "operational" : "idle",
       sub: `${activeLeads.length} Active`,
+    },
+    {
+      id: "regional-ranking",
+      label: "Regional Ranking",
+      icon: Globe,
+      value: "15 Hubs",
+      status: "operational",
+      sub: "Pan-India Radar",
     },
     {
       id: "voice-fleet",
@@ -778,6 +794,9 @@ export function OverviewDashboard({ onNavigate }: { onNavigate?: (mod: string) =
           ))}
         </div>
       </div>
+
+      {/* ── Regional Intelligence Hotspots & Priority Outbound Tile ── */}
+      <RegionalRankingTile onNavigate={onNavigate} industry={industry} />
 
       {/* ── Bottom Row: Recent Activity + Top Leads + CRM Stats ── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

@@ -50,6 +50,7 @@ from app.routers import crm_router
 from app.routers import email_router
 from app.routers import calendly_router
 from app.routers import guardrail_router
+from app.routers import regional_router
 from app.services.search.router import get_search_router
 from config.domain_trust import classify_and_filter, SeedUrl
 
@@ -117,6 +118,9 @@ app.include_router(calendly_router.router, prefix="/api/calendly", tags=["Calend
 
 # Mount Multi-Lingual Speech Guardrail & Blocklist Router
 app.include_router(guardrail_router.router, prefix="/api/guardrail", tags=["Safety Guardrail & Blocklist"])
+
+# Mount Regional Ranking & Hyper-Local Event Intelligence Router
+app.include_router(regional_router.router, prefix="/api/regional", tags=["Regional Intelligence"])
 
 # Also expose Vapi, Sarvam & Tavus Webhooks and Outbound at root path level for compatibility
 app.add_api_route("/webhook/vapi/custom-voice", voice_router.vapi_custom_voice_webhook, methods=["GET", "POST", "HEAD"], tags=["Voice Fleet Webhook"])

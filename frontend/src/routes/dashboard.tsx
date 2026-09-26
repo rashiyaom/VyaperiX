@@ -93,6 +93,7 @@ import { CRMModule } from "@/components/modules/crm";
 import { AnalyticsModule } from "@/components/modules/analytics";
 import { SettingsModule } from "@/components/modules/settings";
 import { OverviewDashboard } from "@/components/modules/overview";
+import { RegionalRankingView } from "@/components/modules/regional";
 import { SecretGuardrailPanel } from "@/components/modules/guardrail/SecretGuardrailPanel";
 import { MODULE_REGISTRY } from "@/modules/registry";
 import { ThemeToggle } from "@/components/app/theme";
@@ -2238,8 +2239,8 @@ function DashboardPage() {
 
   const navItems = MODULE_REGISTRY.map((mod) => ({
     ...mod,
-    // overview is always unlocked; others unlock after first completed report
-    isUnlocked: mod.id === "overview" || mod.id === "intelligence" || hasCompletedReport,
+    // overview, intelligence & regional-ranking are always unlocked; others unlock after first completed report
+    isUnlocked: mod.id === "overview" || mod.id === "intelligence" || mod.id === "regional-ranking" || hasCompletedReport,
   }));
 
   useEffect(() => {
@@ -2485,6 +2486,7 @@ function DashboardPage() {
             {/* 0. Command Center Overview */}
             {activeNav === "overview" && (
               <OverviewDashboard
+                industry={activeAnalysis?.industry || activeCompanyInfo.industry || ""}
                 onNavigate={(mod) => {
                   if (mod === "intelligence") {
                     setView("intake");
@@ -2632,6 +2634,19 @@ function DashboardPage() {
                 onLaunchVoiceAgent={(lead) => {
                   setVoiceTargetLead(lead);
                   setActiveNav("voice-fleet");
+                }}
+              />
+            )}
+
+            {/* 2b. Regional Ranking & Geo-Surveillance View */}
+            {activeNav === "regional-ranking" && (
+              <RegionalRankingView
+                initialIndustry={activeAnalysis?.industry || activeCompanyInfo.industry || ""}
+                userId={user?.id}
+                onNavigateToVoiceFleet={() => setActiveNav("voice-fleet")}
+                onNavigateToIntelligence={() => {
+                  setView("intake");
+                  setActiveNav("intelligence");
                 }}
               />
             )}

@@ -22,6 +22,7 @@ import {
   BarChart3,
   Settings,
   LayoutDashboard,
+  Globe,
   type LucideIcon,
 } from "lucide-react";
 
@@ -69,6 +70,15 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
     badge: "Live",
     description: "Discover and qualify high-intent prospects from 40+ signals before calling.",
     componentPath: "modules/radar",
+  },
+  {
+    id: "regional-ranking",
+    label: "Regional Ranking",
+    icon: Globe,
+    enabled: true,
+    badge: "Hot Zones",
+    description: "Pan-India contextual event & news intelligence to prioritize high-converting regional outbound campaigns.",
+    componentPath: "modules/regional",
   },
   {
     id: "voice-fleet",
