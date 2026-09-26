@@ -67,7 +67,7 @@ export function SiteHeader() {
     { label: t("site.sandbox"), href: "/#sandbox", badge: "Live" },
     { label: t("site.pipeline"), href: "/#pipeline", badge: "6 Modules" },
     { label: t("site.voice"), href: "/#voice", badge: "Real Voice" },
-    { label: t("site.capabs"), href: "/#capabilities" },
+    { label: "Pricing", href: "/pricing", badge: "Tiers" },
     { label: "Intelligence Suite", href: "/scraper", badge: "New" },
     user
       ? { label: "Command Console", href: "/dashboard", badge: "Active" }
@@ -180,6 +180,7 @@ export function SiteFooter() {
             [t("site.sandbox"), "/#sandbox"],
             [t("site.pipeline"), "/#pipeline"],
             ["Voice Agent Fleet", "/#voice"],
+            ["Pricing & Model Tiers", "/pricing"],
             [t("site.capabs"), "/#capabilities"],
             ["Intelligence Suite", "/scraper"],
             ["Sign In / Free Trial", "/login"],
