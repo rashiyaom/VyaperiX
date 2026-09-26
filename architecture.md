@@ -1,5 +1,7 @@
 # 🏗️ VYAPERI X — System Architecture & Technical Blueprint
 
+![VyaperiX System Architecture Diagram](architecture_diagram.jpg)
+
 > **VyaperiX** is an enterprise-grade **Autonomous AI Sales, Commercial Due-Diligence, & Multilingual Fleet Platform** engineered for Indian and global B2B commerce. It integrates real-time web crawlers, multimodal document parsers, grounded RAG intelligence, autonomous voice SDRs, interactive video personas, and WhatsApp CRM dispatchers.
 
 ---
