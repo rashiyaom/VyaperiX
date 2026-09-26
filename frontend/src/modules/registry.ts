@@ -23,6 +23,7 @@ import {
   Settings,
   LayoutDashboard,
   Globe,
+  CreditCard,
   type LucideIcon,
 } from "lucide-react";
 
@@ -133,6 +134,15 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
     badge: "Radar",
     description: "Cross-module performance dashboard — pipeline metrics, conversion funnels.",
     componentPath: "modules/analytics",
+  },
+  {
+    id: "pricing",
+    label: "Pricing & Plans",
+    icon: CreditCard,
+    enabled: true,
+    badge: "Tiers",
+    description: "Transparent AI model compute tiers — Free, Mini, Max, and Gujarati Boss Mode with real-time unit economics.",
+    componentPath: "components/site/PricingView",
   },
   {
     id: "settings",

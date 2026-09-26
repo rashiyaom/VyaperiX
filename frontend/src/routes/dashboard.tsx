@@ -94,6 +94,7 @@ import { AnalyticsModule } from "@/components/modules/analytics";
 import { SettingsModule } from "@/components/modules/settings";
 import { OverviewDashboard } from "@/components/modules/overview";
 import { RegionalRankingView } from "@/components/modules/regional";
+import { PricingView } from "@/components/site/PricingView";
 import { SecretGuardrailPanel } from "@/components/modules/guardrail/SecretGuardrailPanel";
 import { MODULE_REGISTRY } from "@/modules/registry";
 import { ThemeToggle } from "@/components/app/theme";
@@ -2240,8 +2241,8 @@ function DashboardPage() {
 
   const navItems = MODULE_REGISTRY.map((mod) => ({
     ...mod,
-    // overview, intelligence & regional-ranking are always unlocked; others unlock after first completed report
-    isUnlocked: mod.id === "overview" || mod.id === "intelligence" || mod.id === "regional-ranking" || hasCompletedReport,
+    // overview, intelligence, regional-ranking, pricing & settings are always unlocked; others unlock after first completed report
+    isUnlocked: mod.id === "overview" || mod.id === "intelligence" || mod.id === "regional-ranking" || mod.id === "pricing" || mod.id === "settings" || hasCompletedReport,
   }));
 
   useEffect(() => {
@@ -2706,6 +2707,13 @@ function DashboardPage() {
 
             {/* 5. Settings View */}
             {activeNav === "settings" && <SettingsModule companyName={activeCompanyInfo.name} />}
+
+            {/* 6. Pricing & Model Tiers View */}
+            {activeNav === "pricing" && (
+              <div className="rounded-2xl border border-ink/20 bg-card overflow-hidden shadow-2xl">
+                <PricingView />
+              </div>
+            )}
 
             {/* 9. Secret Hate Speech Guardrail & Blocklist Panel */}
             {activeNav === "guardrail" && (
