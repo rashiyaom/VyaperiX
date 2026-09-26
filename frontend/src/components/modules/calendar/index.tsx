@@ -137,6 +137,10 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [actionSuccessMsg, setActionSuccessMsg] = useState<string | null>(null);
 
+  // Confirmation & Multi-Channel Alert Modal State
+  const [confirmModalEvent, setConfirmModalEvent] = useState<CalendarEventRecord | null>(null);
+  const [customMeetingText, setCustomMeetingText] = useState<string>("");
+
   // New Event Form State
   const [formCustomerName, setFormCustomerName] = useState("");
   const [formCustomerEmail, setFormCustomerEmail] = useState("");
@@ -247,34 +251,75 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
     }
   };
 
-  const handleApproveAndSendWhatsApp = async (
+  const handleApproveAndConfirmMeeting = async (
     eventId: string,
-    customStartTime?: string,
-    customEndTime?: string
+    options?: {
+      customStartTime?: string | undefined;
+      customEndTime?: string | undefined;
+      customMessage?: string | undefined;
+      customerPhone?: string | undefined;
+      customerEmail?: string | undefined;
+    } | string,
+    legacyEndTime?: string
   ) => {
     try {
       setApprovingId(eventId);
-      const res = await fetch(`${API_BASE}/api/calendar/events/${eventId}/approve-and-send`, {
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (session?.access_token) {
+        headers["Authorization"] = `Bearer ${session.access_token}`;
+      }
+
+      let startTime: string | undefined;
+      let endTime: string | undefined;
+      let customMessage: string | undefined;
+      let customerPhone: string | undefined;
+      let customerEmail: string | undefined;
+
+      if (typeof options === "string") {
+        startTime = options;
+        endTime = legacyEndTime;
+      } else if (options && typeof options === "object") {
+        startTime = options.customStartTime;
+        endTime = options.customEndTime;
+        customMessage = options.customMessage;
+        customerPhone = options.customerPhone;
+        customerEmail = options.customerEmail;
+      }
+
+      const employeeEmail = user?.email || session?.user?.email || "";
+      const employeeName = user?.name || user?.user_metadata?.full_name || session?.user?.name || "Company Specialist";
+
+      const res = await fetch(`${API_BASE}/api/calendar/events/${eventId}/confirm`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({
-          start_time: customStartTime,
-          end_time: customEndTime,
+          start_time: startTime,
+          end_time: endTime,
+          phone: customerPhone,
+          customer_email: customerEmail,
+          custom_message: customMessage,
+          employee_email: employeeEmail,
+          employee_name: employeeName,
         }),
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        const calendlyMsg = data.calendly_link
-          ? ` Calendly booking link sent to customer.`
-          : ` Meeting link dispatched.`;
-        triggerSuccess(`✓ Booking confirmed & notifications dispatched to ${data.event?.customer_phone || "customer"}.${calendlyMsg}`);
+        const empAlert = data.dispatches?.employee_email || employeeEmail;
+        const custEmail = data.dispatches?.customer_email;
+        const waStatus = data.dispatches?.whatsapp_status;
+        const waMsg = waStatus === "sent" ? "WhatsApp ✓" : (waStatus === "awaiting_scan" ? "WhatsApp (awaiting scan)" : "WhatsApp");
+
+        triggerSuccess(
+          `✓ Meeting confirmed! Dispatched: Email (${custEmail || "client"}), ${waMsg}, SMS & Gmail alert sent to you (${empAlert || "employee"}).`
+        );
         await fetchEvents();
         fetchMeetingLogs();
         if (selectedEvent?.id === eventId) {
           setSelectedEvent(data.event || null);
         }
+        setConfirmModalEvent(null);
       } else {
-        alert(`Approval notice: ${data.detail || data.error || "Failed to dispatch WhatsApp message. Ensure gateway is connected."}`);
+        alert(`Notice: ${data.detail || data.error || data.message || "Failed to confirm meeting."}`);
       }
     } catch (e: any) {
       alert(`Error approving booking: ${e.message}`);
@@ -282,6 +327,8 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
       setApprovingId(null);
     }
   };
+
+  const handleApproveAndSendWhatsApp = handleApproveAndConfirmMeeting;
 
   // Meeting Confirmation Email Dispatch Handler
   const [emailSending, setEmailSending] = useState(false);
@@ -738,10 +785,13 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
                   </button>
                   <button
                     type="button"
-                    onClick={() => handleApproveAndSendWhatsApp(ev.id)}
+                    onClick={() => {
+                      setConfirmModalEvent(ev);
+                      setCustomMeetingText(ev.notes || ev.agenda || "");
+                    }}
                     disabled={approvingId === ev.id}
                     className="flex-1 py-1.5 px-2 text-[11px] font-mono font-bold bg-emerald-600 hover:bg-emerald-700 text-white flex items-center justify-center gap-1.5 shadow-sm transition-all"
-                    title="Confirm meeting and dispatch WhatsApp invite"
+                    title="Confirm meeting and dispatch custom text via Email, WhatsApp & SMS"
                   >
                     {approvingId === ev.id ? (
                       <RefreshCw className="w-3 h-3 animate-spin" />
@@ -1689,32 +1739,34 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
               </button>
 
               <div className="flex items-center gap-2">
-                {selectedEvent.status === "new_booking" ? (
-                  <button
-                    type="button"
-                    onClick={() => handleApproveAndSendWhatsApp(selectedEvent.id)}
-                    disabled={approvingId === selectedEvent.id}
-                    className="flex items-center gap-1.5 px-4 py-2 label-mono text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition-all"
-                  >
-                    {approvingId === selectedEvent.id ? (
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <Check className="w-3.5 h-3.5" />
-                    )}
-                    <span>✓ Confirm & Send Calendly Link</span>
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => handleSendWhatsApp(selectedEvent.id, selectedEvent.customer_phone)}
-                    disabled={waSending}
-                    className="flex items-center gap-1.5 px-3 py-2 label-mono text-xs font-bold border border-lime/50 bg-lime/10 text-lime-800 dark:text-lime hover:bg-lime/20 transition-all"
-                    title="Dispatch WhatsApp meeting invite with live video link"
-                  >
-                    <MessageSquare className="w-3.5 h-3.5 text-lime-600 dark:text-lime" />
-                    <span>{waSending ? "Sending..." : "Send WhatsApp"}</span>
-                  </button>
-                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setConfirmModalEvent(selectedEvent);
+                    setCustomMeetingText(selectedEvent.notes || selectedEvent.agenda || "");
+                  }}
+                  disabled={approvingId === selectedEvent.id}
+                  className="flex items-center gap-1.5 px-4 py-2 label-mono text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition-all"
+                  title="Confirm meeting with custom text and dispatch Email, WhatsApp, SMS & Employee Alert"
+                >
+                  {approvingId === selectedEvent.id ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Check className="w-3.5 h-3.5" />
+                  )}
+                  <span>{selectedEvent.status === "new_booking" ? "✓ Confirm & Send Invites" : "Confirm & Dispatch All"}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleSendWhatsApp(selectedEvent.id, selectedEvent.customer_phone)}
+                  disabled={waSending}
+                  className="flex items-center gap-1.5 px-3 py-2 label-mono text-xs font-bold border border-lime/50 bg-lime/10 text-lime-800 dark:text-lime hover:bg-lime/20 transition-all"
+                  title="Dispatch WhatsApp meeting invite with live video link"
+                >
+                  <MessageSquare className="w-3.5 h-3.5 text-lime-600 dark:text-lime" />
+                  <span>{waSending ? "Sending..." : "WhatsApp"}</span>
+                </button>
 
                 <button
                   type="button"
@@ -1728,7 +1780,7 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
                   ) : (
                     <Mail className="w-3.5 h-3.5 text-violet" />
                   )}
-                  <span>{emailSending ? "Sending..." : "Send Email"}</span>
+                  <span>{emailSending ? "Sending..." : "Email"}</span>
                 </button>
 
                 <button
@@ -1748,6 +1800,150 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
           </div>
         </div>
       )}
+
+      {/* ─────────────────── CONFIRM MEETING & DISPATCH MODAL ─────────────────── */}
+      {confirmModalEvent && (
+        <div className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="border border-ink/40 bg-card max-w-lg w-full p-6 space-y-4 shadow-2xl relative animate-in fade-in zoom-in-95 duration-150">
+            <button
+              onClick={() => setConfirmModalEvent(null)}
+              className="absolute right-4 top-4 p-1 text-muted-foreground hover:text-ink hover:bg-secondary rounded"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="label-mono text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 border border-emerald-500/20 uppercase">
+                  ✓ Enterprise Confirmation
+                </span>
+                <span className="text-[10px] font-mono text-muted-foreground">
+                  Meeting: {confirmModalEvent.title || "Discovery Session"}
+                </span>
+              </div>
+              <h3 className="font-display text-lg font-extrabold uppercase tracking-tight text-ink">
+                Confirm Meeting & Dispatch Alerts
+              </h3>
+              <p className="text-xs font-mono text-muted-foreground">
+                As soon as you confirm, custom text is dispatched via Lead Email (SMTP), WhatsApp Web, SMS, and an alert is sent to your login email ({user?.email || session?.user?.email || "logged-in employee"}).
+              </p>
+            </div>
+
+            {/* Event Summary Card */}
+            <div className="bg-secondary/40 border border-ink/15 p-3 space-y-2 text-xs font-mono">
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Lead / Client:</span>
+                <strong className="text-ink font-semibold">{confirmModalEvent.customer_name || "Valued Partner"}</strong>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Scheduled Time:</span>
+                <span className="text-emerald-700 dark:text-emerald-400 font-bold">
+                  {confirmModalEvent.start_time ? new Date(confirmModalEvent.start_time).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : "Unspecified"}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Client Contact:</span>
+                <span className="text-ink truncate max-w-[240px]">
+                  {confirmModalEvent.customer_email || "No email"} • {confirmModalEvent.customer_phone || "No phone"}
+                </span>
+              </div>
+            </div>
+
+            {/* Custom Message / Notes Textarea */}
+            <div className="space-y-1.5 text-xs font-mono">
+              <label className="font-bold text-ink flex items-center justify-between">
+                <span>Custom Meeting Text / Discussion Agenda:</span>
+                <span className="text-[10px] text-muted-foreground font-normal">Sent via Email, WhatsApp & SMS</span>
+              </label>
+              <textarea
+                value={customMeetingText}
+                onChange={(e) => setCustomMeetingText(e.target.value)}
+                rows={3}
+                placeholder="e.g. As discussed, we look forward to presenting our real-time stock sync and voice calling fleet. Please join 2 mins early with camera and mic."
+                className="w-full bg-paper border border-ink/30 p-2.5 text-xs text-ink focus:border-violet focus:outline-none placeholder:text-muted-foreground/60"
+              />
+            </div>
+
+            {/* Multi-Channel Dispatch Indicators */}
+            <div className="space-y-1.5 pt-1">
+              <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground font-bold">
+                Automated Dispatch Channels
+              </span>
+              <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
+                <div className="p-2 border border-violet/30 bg-violet/5 flex items-center gap-2">
+                  <Mail className="w-3.5 h-3.5 text-violet shrink-0" />
+                  <div className="truncate">
+                    <div className="font-bold text-ink">Lead Email (SMTP)</div>
+                    <div className="text-[10px] text-muted-foreground truncate">{confirmModalEvent.customer_email || "Client inbox"}</div>
+                  </div>
+                </div>
+
+                <div className="p-2 border border-emerald-500/30 bg-emerald-500/5 flex items-center gap-2">
+                  <MessageSquare className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <div className="truncate">
+                    <div className="font-bold text-ink">WhatsApp Web</div>
+                    <div className="text-[10px] text-muted-foreground truncate">{confirmModalEvent.customer_phone || "Mobile WhatsApp"}</div>
+                  </div>
+                </div>
+
+                <div className="p-2 border border-blue-500/30 bg-blue-500/5 flex items-center gap-2">
+                  <Phone className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                  <div className="truncate">
+                    <div className="font-bold text-ink">SMS Dispatch</div>
+                    <div className="text-[10px] text-muted-foreground truncate">{confirmModalEvent.customer_phone || "Phone number"}</div>
+                  </div>
+                </div>
+
+                <div className="p-2 border border-amber-500/30 bg-amber-500/5 flex items-center gap-2">
+                  <Mail className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                  <div className="truncate">
+                    <div className="font-bold text-ink">Employee Gmail Alert</div>
+                    <div className="text-[10px] text-amber-700 dark:text-amber-400 truncate">{user?.email || session?.user?.email || "Current Login"}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-ink/20">
+              <button
+                type="button"
+                onClick={() => setConfirmModalEvent(null)}
+                className="px-4 py-2 border border-ink/20 bg-paper text-ink label-mono text-xs hover:bg-secondary transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={approvingId === confirmModalEvent.id}
+                onClick={() =>
+                  handleApproveAndConfirmMeeting(confirmModalEvent.id, {
+                    customMessage: customMeetingText,
+                    customStartTime: confirmModalEvent.start_time,
+                    customEndTime: confirmModalEvent.end_time,
+                    customerPhone: confirmModalEvent.customer_phone,
+                    customerEmail: confirmModalEvent.customer_email,
+                  })
+                }
+                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white label-mono text-xs font-bold flex items-center gap-2 shadow-sm transition-all"
+              >
+                {approvingId === confirmModalEvent.id ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Dispatching All Channels...</span>
+                  </>
+                ) : (
+                  <>
+                    <Check className="w-3.5 h-3.5" />
+                    <span>Confirm & Dispatch All</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
 
       {/* ─────────────────── SCHEDULE MEETING MODAL ─────────────────── */}
       {showCreateModal && (
@@ -2009,15 +2205,16 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
                   <button
                     type="button"
                     onClick={() => {
-                      const id = viewTranscriptEvent.id;
+                      const ev = viewTranscriptEvent;
                       setViewTranscriptEvent(null);
-                      handleApproveAndSendWhatsApp(id);
+                      setConfirmModalEvent(ev);
+                      setCustomMeetingText(ev.notes || ev.agenda || "");
                     }}
                     disabled={approvingId === viewTranscriptEvent.id}
                     className="px-4 py-1.5 border border-ink bg-emerald-600 hover:bg-emerald-700 text-white label-mono text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all"
                   >
                     <Check className="w-3.5 h-3.5" />
-                    <span>✓ Confirm & Send Calendly Link</span>
+                    <span>✓ Confirm & Send</span>
                   </button>
                 )}
               </div>

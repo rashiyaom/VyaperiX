@@ -24,6 +24,7 @@ from app.services import calendar_service
 from app.services import sms_service
 from app.services import email_service
 from app.services import calendly_service
+from app.services import whatsapp_service
 
 logger = logging.getLogger(__name__)
 
@@ -560,7 +561,14 @@ class ApproveBookingRequest(BaseModel):
     end_time: Optional[str] = None
     meet_url: Optional[str] = None
     phone: Optional[str] = None
+    customer_email: Optional[str] = None
     notes: Optional[str] = None
+    custom_message: Optional[str] = None
+    employee_email: Optional[str] = None
+    employee_name: Optional[str] = None
+    send_whatsapp: Optional[bool] = True
+    send_sms: Optional[bool] = True
+    send_email: Optional[bool] = True
 
 
 @router.get("/check-conflict")
@@ -580,200 +588,264 @@ async def check_slot_conflict(
 
 
 @router.post("/events/{event_id}/approve-and-send")
-async def approve_and_send_whatsapp(
+@router.post("/events/{event_id}/confirm")
+async def approve_and_confirm_meeting(
     event_id: str,
     payload: Optional[ApproveBookingRequest] = None,
+    authorization: Optional[str] = Header(None),
 ):
     """
-    Sales Agent 'Tick to Approve' workflow:
-    1. Confirms the booking status from 'new_booking' to 'confirmed'.
-    2. Allows the sales agent to optionally adjust the slot time (e.g. if resolving a conflict).
-    3. Resolves the Calendly booking link (from settings) to include in the customer notification.
-    4. Dispatches WhatsApp + SMS to the customer with the Calendly self-booking link.
-    5. Saves the Calendly link on the calendar event so the agent can tap it from the dashboard.
+    Enterprise Meeting Confirmation Workflow:
+    As soon as the meeting is confirmed by a company employee in the calendar:
+    1. Dispatches Lead Confirmation Email via SMTP/SMTPS with custom meeting text and meeting link.
+    2. Dispatches WhatsApp Web message to customer with custom text, meeting link, and date/time.
+    3. Dispatches SMS alert to customer with meeting time and join link.
+    4. Dispatches Employee Alert Email/Gmail to the company employee (where login is done)
+       alerting them that the meeting is confirmed for the given time with client details.
+    5. Saves dedicated historical meeting confirmation log in MongoDB.
     """
     event = await db.get_calendar_event(event_id)
     if not event:
         raise HTTPException(status_code=404, detail="Calendar event not found")
 
-    updates: dict = {
-        "status": "confirmed",
-        "has_conflict": False,
-        "approved_at": datetime.now(timezone.utc).isoformat(),
-        "approved_by": "sales_agent",
-    }
+    # ── 1. Resolve Company Employee Email (where login is done) ───────────────
+    employee_email = None
+    if payload and payload.employee_email and "@" in str(payload.employee_email):
+        employee_email = str(payload.employee_email).strip()
 
-    if payload:
-        if payload.start_time:
-            updates["start_time"] = payload.start_time
-        if payload.end_time:
-            updates["end_time"] = payload.end_time
-        if payload.meet_url:
-            updates["meet_url"] = payload.meet_url
-        if payload.notes:
-            updates["notes"] = payload.notes
-        if payload.phone:
-            updates["customer_phone"] = payload.phone
+    if not employee_email and authorization:
+        try:
+            auth_user = await auth_middleware.get_current_user(authorization)
+            if auth_user and auth_user.email:
+                employee_email = str(auth_user.email).strip()
+        except Exception as auth_err:
+            logger.debug(f"Auth token decode in confirm event: {auth_err}")
 
-    # Ensure working live video room link
-    meet_url = updates.get("meet_url") or event.get("meet_url")
+    if not employee_email:
+        raw_owner = event.get("user_email") or event.get("email_owner")
+        if raw_owner and "@" in str(raw_owner):
+            employee_email = str(raw_owner).strip()
+
+    if not employee_email:
+        employee_email = await email_service.resolve_user_registered_email(event.get("user_id"))
+
+    if not employee_email:
+        employee_email = await email_service.resolve_workspace_owner_email(event.get("user_id"))
+
+    employee_name = (payload.employee_name if payload else None) or event.get("approved_by") or "Sales Specialist"
+
+    # ── 2. Resolve Parameters & Custom Meeting Text ───────────────────────────
+    start_time = (payload.start_time if payload else None) or event.get("start_time") or ""
+    end_time = (payload.end_time if payload else None) or event.get("end_time") or ""
+    custom_message = (
+        (payload.custom_message if payload else None)
+        or (payload.notes if payload else None)
+        or event.get("notes")
+        or event.get("custom_message")
+        or ""
+    )
+    agenda = event.get("agenda") or event.get("description") or ""
+    company_name = event.get("company_name") or "VyaperiX"
+    customer_name = event.get("customer_name") or "Valued Partner"
+
+    target_phone = (payload.phone if payload else None) or event.get("customer_phone")
+    target_email = (payload.customer_email if payload else None) or event.get("customer_email")
+
+    # ── 3. Resolve Working Live Video Room / Calendly Link ───────────────────
+    meet_url = (payload.meet_url if payload else None) or event.get("meet_url")
     if not meet_url or "meet.google.com" in meet_url:
         meet_url = calendar_service.generate_live_video_room(
-            event.get("company_name"), event.get("id") or event_id
+            company_name, event.get("id") or event_id
         )
-        updates["meet_url"] = meet_url
 
-    # ── Resolve Calendly booking link ────────────────────────────────────────
     calendly_link = None
     try:
         calendly_link = await calendly_service.get_primary_booking_link()
     except Exception as cal_err:
         logger.warning(f"Could not resolve Calendly booking link: {cal_err}")
 
+    formatted_time = email_service.format_datetime_human(start_time)
+
+    # ── 4. Build Status Updates Dict ──────────────────────────────────────────
+    updates: dict = {
+        "status": "confirmed",
+        "has_conflict": False,
+        "approved_at": datetime.now(timezone.utc).isoformat(),
+        "approved_by": employee_email or "company_employee",
+        "confirmed_by_employee_email": employee_email,
+        "start_time": start_time,
+        "end_time": end_time,
+        "meet_url": meet_url,
+        "notes": custom_message,
+        "custom_message": custom_message,
+    }
+    if target_phone:
+        updates["customer_phone"] = target_phone
+    if target_email:
+        updates["customer_email"] = target_email
     if calendly_link:
         updates["calendly_link"] = calendly_link
         updates["calendly_link_sent_at"] = datetime.now(timezone.utc).isoformat()
         updates["calendly_booked"] = updates.get("calendly_booked", False)
 
-    # Check recipient phone number
-    target_phone = updates.get("customer_phone") or event.get("customer_phone")
-    if not target_phone:
-        raise HTTPException(
-            status_code=400,
-            detail="Cannot dispatch WhatsApp: No customer phone number associated with this booking."
-        )
+    # ── 5. Dispatch WhatsApp Web Message to Lead ──────────────────────────────
+    wa_res: dict = {"success": False, "skipped": True}
+    should_send_wa = payload.send_whatsapp if (payload and payload.send_whatsapp is not None) else True
 
-    # Format and send rich WhatsApp message with Calendly link
-    from app.services import whatsapp_service
-    start_time_to_send = updates.get("start_time") or event.get("start_time") or ""
-    agenda_to_send = event.get("agenda") or event.get("description") or ""
-    requirements_to_send = updates.get("notes") or event.get("notes") or ""
-
-    wa_res = await whatsapp_service.send_meeting_confirmation_with_calendly(
-        customer_name=event.get("customer_name") or "there",
-        customer_phone=target_phone,
-        business_name=event.get("company_name") or "Vyepari X",
-        start_time=start_time_to_send,
-        meet_url=meet_url,
-        calendly_link=calendly_link,
-        agenda=agenda_to_send,
-        requirements=requirements_to_send,
-    )
-
-    if wa_res.get("success"):
-        updates["whatsapp_status"] = "sent"
-        updates["whatsapp_sent_at"] = datetime.now(timezone.utc).isoformat()
-    else:
-        updates["whatsapp_status"] = "failed"
-        updates["whatsapp_error"] = wa_res.get("error")
-        logger.warning(f"WhatsApp dispatch skipped/failed for booking {event_id}: {wa_res.get('error')}")
-
-    # ── SMS notification with Calendly link ──────────────────────────────────
-    try:
-        rep_phone = await _resolve_rep_phone(event.get("user_id"))
-        meeting_time_str = str(start_time_to_send)
+    if target_phone and should_send_wa:
         try:
-            dt = datetime.fromisoformat(meeting_time_str.replace("Z", "+00:00"))
-            formatted_time = dt.strftime("%Y-%m-%d %H:%M")
-        except Exception:
-            formatted_time = meeting_time_str
-
-        if await _sms_alerts_enabled(event.get("user_id")):
-            sms_body = (
-                f"[VyaperiX] Booking confirmed for {event.get('customer_name', 'Lead')}."
-                f" Time: {formatted_time}."
+            wa_res = await whatsapp_service.send_meeting_confirmation_with_calendly(
+                customer_name=customer_name,
+                customer_phone=target_phone,
+                business_name=company_name,
+                start_time=start_time,
+                meet_url=meet_url,
+                calendly_link=calendly_link,
+                agenda=agenda,
+                requirements=event.get("notes") or "",
+                custom_message=custom_message,
+                employee_name=employee_name,
             )
-            if calendly_link:
-                sms_body += f" Book slot: {calendly_link}"
-            elif meet_url:
-                sms_body += f" Video: {meet_url}"
-            sms_service.send_sms(rep_phone, sms_body)
-            # Also SMS the customer with Calendly link
-            if target_phone:
-                customer_sms = (
-                    f"Hello {event.get('customer_name', 'there')}! "
-                    f"Your meeting with {event.get('company_name', 'our team')} is confirmed."
-                )
-                if calendly_link:
-                    customer_sms += f" Pick your preferred time here: {calendly_link}"
-                elif meet_url:
-                    customer_sms += f" Join here: {meet_url}"
-                sms_service.send_sms(target_phone, customer_sms)
-    except Exception as sms_err:
-        logger.warning(f"SMS notification failed during booking approval: {sms_err}")
+            if wa_res.get("success"):
+                updates["whatsapp_status"] = "sent"
+                updates["whatsapp_sent_at"] = datetime.now(timezone.utc).isoformat()
+            else:
+                err_text = str(wa_res.get("error", ""))
+                updates["whatsapp_status"] = "awaiting_scan" if ("not connected" in err_text or "gateway" in err_text) else "failed"
+                updates["whatsapp_error"] = err_text
+                logger.info(f"WhatsApp dispatch status for booking {event_id}: {err_text}")
+        except Exception as wa_err:
+            logger.warning(f"WhatsApp dispatch error: {wa_err}")
+            updates["whatsapp_status"] = "failed"
+            updates["whatsapp_error"] = str(wa_err)
+    else:
+        updates["whatsapp_status"] = "skipped_no_phone" if not target_phone else "skipped_by_flag"
 
-    # ── Email notification ───────────────────────────────────────────────────
-    try:
-        owner_email = await email_service.resolve_workspace_owner_email(event.get("user_id"))
-        rep_email = await email_service.resolve_user_registered_email(event.get("user_id"))
-        customer_email = updates.get("customer_email") or event.get("customer_email")
-        if owner_email or rep_email or customer_email:
-            await email_service.send_meeting_email(
-                rep_email=rep_email or "",
-                prospect_email=customer_email,
-                lead_name=event.get("customer_name") or "Valued Partner",
-                meeting_time=start_time_to_send,
+    # ── 6. Dispatch SMS to Lead & Rep ─────────────────────────────────────────
+    sms_res: dict = {"rep": None, "prospect": None}
+    should_send_sms = payload.send_sms if (payload and payload.send_sms is not None) else True
+
+    if target_phone and should_send_sms:
+        try:
+            rep_phone = await _resolve_rep_phone(event.get("user_id"))
+            sms_res = sms_service.send_meeting_sms(
+                rep_phone=rep_phone,
+                prospect_phone=target_phone,
+                lead_name=customer_name,
+                meeting_time=formatted_time,
+                meeting_link=calendly_link or meet_url,
+                send_to_prospect=bool(target_phone),
+                source="approved_booking",
+                company_name=company_name,
+            )
+            updates["sms_status"] = "sent" if (sms_res.get("prospect") or {}).get("status") in ("sent", "mocked") else "failed"
+        except Exception as sms_err:
+            logger.warning(f"SMS notification failed during booking approval: {sms_err}")
+            updates["sms_status"] = "error"
+    else:
+        updates["sms_status"] = "skipped_no_phone" if not target_phone else "skipped_by_flag"
+
+    # ── 7. Dispatch Email Broadcast via SMTP/SMTPS ───────────────────────────
+    # Channels:
+    # A) Lead Confirmation Email (with custom text & live meeting link)
+    # B) Company Employee Gmail Alert (where login is done)
+    email_res: dict = {"customer": None, "employee": None, "owner": None}
+    should_send_email = payload.send_email if (payload and payload.send_email is not None) else True
+
+    if should_send_email:
+        try:
+            email_res = await email_service.send_meeting_confirmation_broadcast(
+                employee_email=employee_email,
+                customer_email=target_email,
+                lead_name=customer_name,
+                meeting_time=start_time,
                 meeting_link=calendly_link or meet_url,
                 title=event.get("title") or "Confirmed Discovery Session",
-                agenda=agenda_to_send,
+                agenda=agenda,
                 customer_phone=target_phone,
-                company_name=event.get("company_name"),
-                send_to_prospect=bool(customer_email),
-                owner_email=owner_email,
+                company_name=company_name,
+                custom_message=custom_message,
+                employee_name=employee_name,
                 user_id=event.get("user_id"),
                 source="approved_booking",
             )
-            updates["email_status"] = "sent"
-            updates["email_sent_at"] = datetime.now(timezone.utc).isoformat()
-            updates["email_owner"] = owner_email
-    except Exception as email_err:
-        logger.warning(f"Email notification failed during booking approval: {email_err}")
+            cust_status = (email_res.get("customer") or {}).get("status")
+            emp_status = (email_res.get("employee") or {}).get("status")
 
+            updates["email_status"] = "sent" if cust_status in ("sent", "mocked") else ("skipped" if cust_status == "skipped" else "failed")
+            updates["email_sent_at"] = datetime.now(timezone.utc).isoformat()
+            updates["email_owner"] = employee_email
+            updates["employee_email"] = employee_email
+            updates["employee_email_status"] = "sent" if emp_status in ("sent", "mocked") else ("skipped" if emp_status == "skipped" else "failed")
+        except Exception as email_err:
+            logger.warning(f"Email broadcast failed during booking approval: {email_err}")
+            updates["email_status"] = "error"
+
+    # ── 8. Persist Event & Record Dedicated Meeting Log ───────────────────────
     updated_event = await db.update_calendar_event(event_id, updates)
 
-    # Save dedicated Accepted Meeting Log in MongoDB
     try:
         await db.create_meeting_log(
             {
                 "event_id": event_id,
                 "call_id": event.get("call_id"),
-                "customer_name": event.get("customer_name") or "Valued Partner",
+                "customer_name": customer_name,
                 "customer_phone": target_phone,
-                "customer_email": updates.get("customer_email") or event.get("customer_email"),
-                "company_name": event.get("company_name") or "",
+                "customer_email": target_email,
+                "employee_email": employee_email,
+                "company_name": company_name,
                 "title": event.get("title") or "Confirmed Meeting",
                 "description": event.get("description") or "",
-                "agenda": agenda_to_send,
-                "notes": requirements_to_send,
-                "start_time": start_time_to_send,
-                "end_time": updates.get("end_time") or event.get("end_time"),
+                "agenda": agenda,
+                "notes": custom_message,
+                "custom_message": custom_message,
+                "start_time": start_time,
+                "end_time": end_time,
+                "formatted_time": formatted_time,
                 "meet_url": meet_url,
                 "calendly_link": calendly_link,
                 "calendly_booked": updates.get("calendly_booked", False),
                 "status": "accepted",
                 "approval_status": "accepted",
                 "approved_at": updates.get("approved_at"),
-                "approved_by": "sales_agent",
-                "whatsapp_status": updates.get("whatsapp_status", "sent"),
+                "approved_by": employee_email or "company_employee",
+                "confirmed_by_employee_email": employee_email,
+                "whatsapp_status": updates.get("whatsapp_status", "pending"),
                 "whatsapp_sent_at": updates.get("whatsapp_sent_at"),
-                "email_status": updates.get("email_status", "sent"),
+                "email_status": updates.get("email_status", "pending"),
                 "email_sent_at": updates.get("email_sent_at"),
-                "channels_notified": ["whatsapp", "email", "sms"],
+                "employee_email_status": updates.get("employee_email_status", "pending"),
+                "sms_status": updates.get("sms_status", "pending"),
+                "channels_notified": ["whatsapp", "customer_email", "sms", "employee_gmail"],
             },
             user_id=event.get("user_id"),
-            user_email=event.get("user_email") or event.get("email_owner"),
+            user_email=employee_email or event.get("user_email"),
         )
     except Exception as log_err:
         logger.warning(f"Could not record dedicated meeting log: {log_err}")
 
+    emp_feedback = f" & Gmail alert dispatched to {employee_email}" if employee_email else ""
     return {
         "success": True,
-        "message": "✓ Booking confirmed! Calendly self-booking link dispatched via WhatsApp & SMS.",
+        "message": f"✓ Meeting confirmed for {formatted_time}! Notifications dispatched: Email, SMS, WhatsApp{emp_feedback}.",
         "event": updated_event,
-        "whatsapp_result": wa_res,
+        "dispatches": {
+            "whatsapp": wa_res,
+            "whatsapp_status": updates.get("whatsapp_status"),
+            "sms": sms_res,
+            "sms_status": updates.get("sms_status"),
+            "customer_email": target_email,
+            "customer_email_status": (email_res.get("customer") or {}).get("status"),
+            "employee_email": employee_email,
+            "employee_email_status": (email_res.get("employee") or {}).get("status"),
+            "meet_url": meet_url,
+            "formatted_time": formatted_time,
+            "custom_message": custom_message,
+        },
         "meet_url": meet_url,
         "calendly_link": calendly_link,
     }
+
 
 
 # ─────────────────────────── Accepted Meeting Logs Endpoints ───────────

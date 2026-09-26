@@ -159,6 +159,8 @@ async def send_meeting_confirmation(
     meet_url: str,
     agenda: Optional[str] = None,
     requirements: Optional[str] = None,
+    custom_message: Optional[str] = None,
+    employee_name: Optional[str] = None,
 ) -> dict:
     """
     Builds and sends a meeting confirmation message with live video room link & call requirements.
@@ -178,6 +180,9 @@ async def send_meeting_confirmation(
         "_(Click link above to join from your mobile phone or PC. No app download or account required!)_",
     ]
 
+    if custom_message:
+        lines.extend(["", f"💬 *Meeting Note / Custom Message:*\n{custom_message.strip()}"])
+
     if agenda:
         clean_agenda = agenda.strip()
         lines.extend(["", f"📋 *Discussion Agenda & Topics:*\n{clean_agenda}"])
@@ -186,12 +191,13 @@ async def send_meeting_confirmation(
         clean_req = requirements.strip()
         lines.extend(["", f"📌 *Key Requirements Noted from Call:*\n_{clean_req}_"])
 
+    sign_off = f"— {employee_name.strip()} | *{b_name}*" if employee_name else f"— Team *{b_name}*"
     lines.extend([
         "",
         "💡 *Session Tips:* Please join 2 minutes early with your camera and microphone enabled for the live walkthrough.",
         "",
         "Looking forward to connecting! If you need to reschedule or have questions before the session, simply reply to this WhatsApp message.",
-        f"— Team *{b_name}*",
+        sign_off,
     ])
 
     full_message = "\n".join(lines)
@@ -255,6 +261,8 @@ async def send_meeting_confirmation_with_calendly(
     calendly_link: Optional[str] = None,
     agenda: Optional[str] = None,
     requirements: Optional[str] = None,
+    custom_message: Optional[str] = None,
+    employee_name: Optional[str] = None,
 ) -> dict:
     """
     Sends a meeting confirmation. If a Calendly link is provided, it is featured
@@ -288,6 +296,9 @@ async def send_meeting_confirmation_with_calendly(
             "_(Click link above to join from mobile or PC. No app download required!)_",
         ]
 
+    if custom_message:
+        lines.extend(["", f"💬 *Meeting Note / Custom Message:*\n{custom_message.strip()}"])
+
     if agenda:
         clean_agenda = agenda.strip()
         lines.extend(["", f"📋 *Discussion Agenda:*\n{clean_agenda}"])
@@ -296,12 +307,13 @@ async def send_meeting_confirmation_with_calendly(
         clean_req = requirements.strip()
         lines.extend(["", f"📌 *Key Requirements from Call:*\n_{clean_req}_"])
 
+    sign_off = f"— {employee_name.strip()} | *{b_name}*" if employee_name else f"— Team *{b_name}*"
     lines.extend([
         "",
         "💡 *Tip:* Join 2 minutes early with your camera and mic enabled.",
         "",
         "Reply to this WhatsApp message anytime if you have questions.",
-        f"— Team *{b_name}*",
+        sign_off,
     ])
 
     full_message = "\n".join(lines)

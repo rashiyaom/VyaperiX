@@ -114,53 +114,60 @@ def send_sms(phone_number: str, message: str) -> dict:
 
 
 def send_meeting_sms(
-    rep_phone: str,
+    rep_phone: Optional[str],
     prospect_phone: Optional[str],
     lead_name: str,
     meeting_time: str,
     meeting_link: str,
-    send_to_prospect: bool,
+    send_to_prospect: bool = True,
     source: str = "manual",
-) -> None:
+    company_name: Optional[str] = None,
+) -> dict:
     """
     Send meeting booking SMS to sales representative and optionally to the prospect.
 
-    - Calls send_sms for rep_phone with:
-      f"Hot Lead Booked by AI! {lead_name} agreed to a meeting at {meeting_time}. Link: {meeting_link}" (when source == "ai_call")
-      or f"Hot Lead Booked! {lead_name} - meeting at {meeting_time}. Link: {meeting_link}" (default)
-    - If send_to_prospect is True and prospect_phone is truthy, calls send_sms for prospect_phone with:
-      f"Hi {lead_name}, your meeting with Vyaperi is confirmed for {meeting_time}. Link: {meeting_link}"
+    - Calls send_sms for rep_phone if provided.
+    - If send_to_prospect is True and prospect_phone is truthy, calls send_sms for prospect_phone.
     - If either message exceeds ~155 characters, truncates lead_name first, then meeting_link as a last resort.
     - Calls each send inside its own try/except so one failure does not block the other.
+    - Returns results dict.
     """
+    results: Dict[str, Any] = {"rep": None, "prospect": None}
+    comp = company_name or "VyaperiX"
+
     if source == "ai_call":
-        prefix = "Hot Lead Booked by AI! "
+        prefix = f"[{comp}] Hot Lead Booked! "
         middle = f" agreed to a meeting at {meeting_time}. Link: "
     else:
-        prefix = "Hot Lead Booked! "
+        prefix = f"[{comp}] Booking Confirmed! "
         middle = f" - meeting at {meeting_time}. Link: "
 
-    rep_message = _format_meeting_message(
-        prefix=prefix,
-        lead_name=lead_name,
-        middle=middle,
-        meeting_link=meeting_link,
-        max_len=155,
-    )
-    try:
-        send_sms(rep_phone, rep_message)
-    except Exception as e:
-        logger.error(f"Failed to dispatch rep meeting SMS to {rep_phone}: {e}")
+    if rep_phone:
+        rep_message = _format_meeting_message(
+            prefix=prefix,
+            lead_name=lead_name,
+            middle=middle,
+            meeting_link=meeting_link,
+            max_len=155,
+        )
+        try:
+            results["rep"] = send_sms(rep_phone, rep_message)
+        except Exception as e:
+            logger.error(f"Failed to dispatch rep meeting SMS to {rep_phone}: {e}")
+            results["rep"] = {"status": "failed", "error": str(e)}
 
     if send_to_prospect and prospect_phone:
         prospect_message = _format_meeting_message(
             prefix="Hi ",
             lead_name=lead_name,
-            middle=f", your meeting with Vyaperi is confirmed for {meeting_time}. Link: ",
+            middle=f", your meeting with {comp} is confirmed for {meeting_time}. Link: ",
             meeting_link=meeting_link,
             max_len=155,
         )
         try:
-            send_sms(prospect_phone, prospect_message)
+            results["prospect"] = send_sms(prospect_phone, prospect_message)
         except Exception as e:
             logger.error(f"Failed to dispatch prospect meeting SMS to {prospect_phone}: {e}")
+            results["prospect"] = {"status": "failed", "error": str(e)}
+
+    return results

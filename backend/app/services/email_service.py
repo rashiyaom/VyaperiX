@@ -168,12 +168,12 @@ def _send_smtp_sync(
     msg.attach(part_html)
 
     try:
-        if config["secure"] == "ssl" or config["port"] == 465:
+        if config["secure"] in ("ssl", "smtps") or config["port"] == 465:
             server = smtplib.SMTP_SSL(config["host"], config["port"], timeout=12.0)
         else:
             server = smtplib.SMTP(config["host"], config["port"], timeout=12.0)
             server.ehlo()
-            if config["secure"] == "starttls" or config["port"] in (587, 25):
+            if config["secure"] in ("starttls", "tls") or config["port"] in (587, 25):
                 server.starttls()
                 server.ehlo()
 
@@ -340,6 +340,18 @@ def _render_greeting_html(user_name: str, to_email: str, company_name: Optional[
 """
 
 
+def format_datetime_human(iso_time: str) -> str:
+    """Formats an ISO-8601 or string timestamp into a clean, human-readable date and time string."""
+    if not iso_time:
+        return "Upcoming Session"
+    try:
+        cleaned = str(iso_time).replace("Z", "+00:00")
+        dt = datetime.fromisoformat(cleaned)
+        return dt.strftime("%A, %d %b %Y at %I:%M %p")
+    except Exception:
+        return str(iso_time)
+
+
 def _render_meeting_html(
     lead_name: str,
     meeting_time: str,
@@ -349,36 +361,29 @@ def _render_meeting_html(
     customer_phone: Optional[str] = None,
     prospect_email: Optional[str] = None,
     company_name: Optional[str] = None,
-    recipient_type: str = "owner",  # "owner" | "rep" | "customer"
+    recipient_type: str = "owner",  # "owner" | "rep" | "employee" | "customer"
     source: str = "calendar",
+    custom_message: Optional[str] = None,
+    employee_name: Optional[str] = None,
+    employee_email: Optional[str] = None,
 ) -> str:
     """Generate high-impact, responsive HTML meeting confirmation email."""
     year = datetime.now().year
     safe_link = meeting_link or "https://meet.jit.si/VyaperiX-Live-Demo"
     company_display = company_name or "VyaperiX Enterprise"
+    formatted_time = format_datetime_human(meeting_time)
 
-    if recipient_type == "owner":
-        target_role = "Executive Owner Alert"
-        badge_text = "✓ Owner Notified"
+    if recipient_type in ("owner", "rep", "employee"):
+        target_role = "Company Employee Meeting Alert" if recipient_type == "employee" else "Executive Owner Alert"
+        badge_text = "✓ Confirmed & Synced"
         badge_style = "background-color: rgba(124, 58, 237, 0.2); border: 1px solid rgba(124, 58, 237, 0.5); color: #c084fc;"
         accent_bar = "background: linear-gradient(90deg, #7c3aed, #a855f7, #10b981);"
-        hero_heading = f"📅 Meeting Booked on {meeting_time} with {lead_name}"
+        hero_heading = f"📅 Meeting Confirmed for {formatted_time} with {lead_name}"
         intro_paragraph = (
-            f"A new meeting has been confirmed for <strong>{meeting_time}</strong> with <strong>{lead_name}</strong>. "
-            f"The meeting has been synchronized with your VyaperiX calendar."
+            f"Your meeting with <strong>{lead_name}</strong> is confirmed for <strong>{formatted_time}</strong>. "
+            f"All attendee notification channels (Lead Email, WhatsApp Web & SMS) have been dispatched."
         )
         button_text = "🎥 Join Live Video Meeting Room as Host →"
-    elif recipient_type == "rep":
-        target_role = "Sales Representative Briefing"
-        badge_text = "✓ Confirmed"
-        badge_style = "background-color: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); color: #34d399;"
-        accent_bar = "background: linear-gradient(90deg, #10b981, #06b6d4, #7c3aed);"
-        hero_heading = f"🔥 New Hot Lead Meeting Booked: {lead_name}"
-        intro_paragraph = (
-            f"A sales discovery meeting with <strong>{lead_name}</strong> has been confirmed for <strong>{meeting_time}</strong>. "
-            f"The details have been synchronized with your VyaperiX calendar."
-        )
-        button_text = "🎥 Join Live Video Meeting Room →"
     else:
         target_role = "Client Meeting Confirmation"
         badge_text = "✓ Confirmed"
@@ -386,21 +391,32 @@ def _render_meeting_html(
         accent_bar = "background: linear-gradient(90deg, #06b6d4, #3b82f6, #10b981);"
         hero_heading = f"Meeting Confirmed: {title}"
         intro_paragraph = (
-            f"Your meeting with <strong>{company_display}</strong> is confirmed for <strong>{meeting_time}</strong>. "
+            f"Your meeting with <strong>{company_display}</strong> is officially confirmed for <strong>{formatted_time}</strong>. "
             f"We look forward to speaking with you at the scheduled time."
         )
         button_text = "🎥 Join Live Video Meeting Room →"
 
+    custom_msg_box = f"""
+    <table role="presentation" width="100%" style="background-color: rgba(124, 58, 237, 0.08); border-left: 4px solid #a855f7; border-radius: 6px; margin: 18px 0 22px 0; padding: 14px 18px;">
+      <tr>
+        <td>
+          <div style="font-size: 11px; font-weight: 800; color: #c084fc; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 6px;">Custom Meeting Note / Agenda:</div>
+          <div style="font-size: 13.5px; color: #f4f4f5; line-height: 1.6;">{custom_message}</div>
+        </td>
+      </tr>
+    </table>
+    """ if custom_message else ""
+
     agenda_html = f"""
     <tr style="border-top: 1px solid #27272a;">
-      <td style="padding: 10px 0; font-size: 12px; color: #a1a1aa;">Agenda / Notes:</td>
+      <td style="padding: 10px 0; font-size: 12px; color: #a1a1aa;">Discussion Agenda:</td>
       <td style="padding: 10px 0; font-size: 13px; color: #e4e4e7; font-weight: 500;">{agenda}</td>
     </tr>
     """ if agenda else ""
 
     phone_html = f"""
     <tr style="border-top: 1px solid #27272a;">
-      <td style="padding: 10px 0; font-size: 12px; color: #a1a1aa;">Phone Number:</td>
+      <td style="padding: 10px 0; font-size: 12px; color: #a1a1aa;">Client Phone:</td>
       <td style="padding: 10px 0; font-size: 13px; color: #e4e4e7; font-weight: 500;">{customer_phone}</td>
     </tr>
     """ if customer_phone else ""
@@ -412,9 +428,16 @@ def _render_meeting_html(
     </tr>
     """ if (prospect_email and recipient_type != "customer") else ""
 
+    host_html = f"""
+    <tr style="border-top: 1px solid #27272a;">
+      <td style="padding: 10px 0; font-size: 12px; color: #a1a1aa;">Meeting Host:</td>
+      <td style="padding: 10px 0; font-size: 13px; color: #e4e4e7; font-weight: 500;">{employee_name or 'Account Executive'} ({employee_email or 'Company Host'})</td>
+    </tr>
+    """ if (employee_email and recipient_type == "customer") else ""
+
     source_html = f"""
     <tr style="border-top: 1px solid #27272a;">
-      <td style="padding: 10px 0; font-size: 12px; color: #a1a1aa;">Booking Origin:</td>
+      <td style="padding: 10px 0; font-size: 12px; color: #a1a1aa;">Confirmation Origin:</td>
       <td style="padding: 10px 0; font-size: 12px; color: #a855f7; font-weight: 600;">{source.replace('_', ' ').title()}</td>
     </tr>
     """ if (source and recipient_type != "customer") else ""
@@ -459,9 +482,11 @@ def _render_meeting_html(
               <h1 style="font-size: 22px; font-weight: 800; color: #ffffff; margin: 0 0 12px 0; line-height: 1.3;">
                 {hero_heading}
               </h1>
-              <p style="font-size: 13.5px; line-height: 1.6; color: #d4d4d8; margin: 0 0 24px 0;">
+              <p style="font-size: 13.5px; line-height: 1.6; color: #d4d4d8; margin: 0 0 18px 0;">
                 {intro_paragraph}
               </p>
+
+              {custom_msg_box}
 
               <!-- Meeting Details Card -->
               <table role="presentation" width="100%" style="background-color: #181b26; border: 1px solid #27272a; border-radius: 8px; margin-bottom: 26px; padding: 16px 20px;">
@@ -476,14 +501,15 @@ def _render_meeting_html(
                 </tr>
                 <tr style="border-top: 1px solid #27272a;">
                   <td style="padding: 8px 0; font-size: 12px; color: #a1a1aa;">Scheduled Time:</td>
-                  <td style="padding: 8px 0; font-size: 13.5px; color: #34d399; font-weight: 800; letter-spacing: 0.3px;">{meeting_time}</td>
+                  <td style="padding: 8px 0; font-size: 13.5px; color: #34d399; font-weight: 800; letter-spacing: 0.3px;">{formatted_time}</td>
                 </tr>
                 <tr style="border-top: 1px solid #27272a;">
-                  <td style="padding: 8px 0; font-size: 12px; color: #a1a1aa;">Participant:</td>
+                  <td style="padding: 8px 0; font-size: 12px; color: #a1a1aa;">Client / Attendee:</td>
                   <td style="padding: 8px 0; font-size: 13px; color: #ffffff; font-weight: 600;">{lead_name}</td>
                 </tr>
                 {phone_html}
                 {email_html}
+                {host_html}
                 {source_html}
                 {agenda_html}
               </table>
@@ -501,7 +527,7 @@ def _render_meeting_html(
 
               <!-- Direct URL Fallback -->
               <p style="font-size: 11px; color: #71717a; text-align: center; margin: 0 0 16px 0;">
-                Direct Meeting Link: <a href="{safe_link}" target="_blank" style="color: #38bdf8; text-decoration: underline;">{safe_link}</a>
+                Direct Meeting Room Link: <a href="{safe_link}" target="_blank" style="color: #38bdf8; text-decoration: underline;">{safe_link}</a>
               </p>
 
               <div style="background-color: rgba(24, 27, 38, 0.7); border-left: 3px solid #7c3aed; padding: 10px 14px; border-radius: 4px;">
@@ -519,7 +545,7 @@ def _render_meeting_html(
                 VyaperiX Autonomous Commercial Operations
               </p>
               <p style="font-size: 10px; color: #52525b; margin: 0;">
-                © {year} VyaperiX Inc. • Automated Sales Fleet & Scheduling System
+                © {year} {company_display} • Powered by VyaperiX Commercial Intelligence
               </p>
             </td>
           </tr>
@@ -577,6 +603,8 @@ async def send_meeting_email(
     owner_email: Optional[str] = None,
     user_id: Optional[str] = None,
     source: str = "calendar",
+    custom_message: Optional[str] = None,
+    employee_name: Optional[str] = None,
 ) -> dict:
     """
     Dispatch meeting booking confirmation emails:
@@ -585,15 +613,16 @@ async def send_meeting_email(
     3. Optionally sent to prospect_email if provided and send_to_prospect is True.
     """
     results: Dict[str, Any] = {"owner": None, "rep": None, "prospect": None}
+    formatted_time = format_datetime_human(meeting_time)
 
     # Resolve owner email if not explicitly provided
     resolved_owner = owner_email
     if not resolved_owner:
         resolved_owner = await resolve_workspace_owner_email(user_id)
 
-    # 1. Dispatch to Workspace Owner: "Meeting is booked on this date and time"
+    # 1. Dispatch to Workspace Owner / Assigned Manager
     if resolved_owner and "@" in resolved_owner:
-        owner_subject = f"📅 [Owner Alert] Meeting Booked on {meeting_time} with {lead_name} — {title}"
+        owner_subject = f"📅 [Owner Alert] Meeting Booked on {formatted_time} with {lead_name} — {title}"
         owner_html = _render_meeting_html(
             lead_name=lead_name,
             meeting_time=meeting_time,
@@ -605,16 +634,19 @@ async def send_meeting_email(
             company_name=company_name,
             recipient_type="owner",
             source=source,
+            custom_message=custom_message,
+            employee_name=employee_name,
+            employee_email=rep_email or resolved_owner,
         )
         owner_text = (
             f"EXECUTIVE OWNER ALERT: MEETING BOOKED\n"
-            f"Scheduled Date & Time: {meeting_time}\n"
+            f"Scheduled Date & Time: {formatted_time}\n"
             f"Participant / Lead: {lead_name}\n"
             f"Meeting Title: {title}\n"
             f"Customer Phone: {customer_phone or 'N/A'}\n"
             f"Customer Email: {prospect_email or 'N/A'}\n"
             f"Live Video Meeting Link: {meeting_link}\n"
-            f"Agenda: {agenda or 'Sales exploration and product demonstration.'}\n"
+            f"Agenda / Notes: {custom_message or agenda or 'Sales exploration and product demonstration.'}\n"
             f"Source: {source}\n"
         )
         results["owner"] = await send_email(
@@ -629,10 +661,9 @@ async def send_meeting_email(
     # 2. Dispatch to Sales Rep / Assignee (if distinct from owner)
     if rep_email and "@" in rep_email:
         if resolved_owner and rep_email.strip().lower() == resolved_owner.strip().lower():
-            # Same recipient as owner
             results["rep"] = results.get("owner")
         else:
-            rep_subject = f"🔥 Meeting Booked on {meeting_time} with {lead_name} ({title})"
+            rep_subject = f"🔥 Meeting Booked on {formatted_time} with {lead_name} ({title})"
             rep_html = _render_meeting_html(
                 lead_name=lead_name,
                 meeting_time=meeting_time,
@@ -644,15 +675,18 @@ async def send_meeting_email(
                 company_name=company_name,
                 recipient_type="rep",
                 source=source,
+                custom_message=custom_message,
+                employee_name=employee_name,
+                employee_email=rep_email,
             )
             rep_text = (
                 f"HOT LEAD MEETING BOOKED: {lead_name}\n"
-                f"Scheduled Time: {meeting_time}\n"
+                f"Scheduled Time: {formatted_time}\n"
                 f"Topic: {title}\n"
                 f"Phone: {customer_phone or 'N/A'}\n"
                 f"Email: {prospect_email or 'N/A'}\n"
                 f"Join Video Meeting Link: {meeting_link}\n"
-                f"Agenda: {agenda or 'Sales exploration and product demonstration.'}\n"
+                f"Agenda / Notes: {custom_message or agenda or 'Sales exploration and product demonstration.'}\n"
             )
             results["rep"] = await send_email(
                 to_email=rep_email,
@@ -677,14 +711,26 @@ async def send_meeting_email(
             company_name=company_name,
             recipient_type="customer",
             source=source,
+            custom_message=custom_message,
+            employee_name=employee_name,
+            employee_email=rep_email or resolved_owner,
         )
-        prospect_text = (
-            f"Hi {lead_name},\n\n"
-            f"Your meeting with {company_name or 'VyaperiX'} is confirmed for {meeting_time}.\n\n"
-            f"Join Live Video Meeting: {meeting_link}\n"
-            f"Topic: {title}\n\n"
-            f"We look forward to speaking with you!"
-        )
+        prospect_text_lines = [
+            f"Hi {lead_name},",
+            "",
+            f"Your meeting with {company_name or 'VyaperiX'} is confirmed for {formatted_time}.",
+            "",
+            f"🎥 Join Live Video Meeting: {meeting_link}",
+            f"Topic: {title}",
+        ]
+        if custom_message:
+            prospect_text_lines.extend(["", f"Note from our team:\n{custom_message}"])
+        elif agenda:
+            prospect_text_lines.extend(["", f"Discussion Agenda:\n{agenda}"])
+
+        prospect_text_lines.extend(["", "We look forward to speaking with you!"])
+        prospect_text = "\n".join(prospect_text_lines)
+
         results["prospect"] = await send_email(
             to_email=prospect_email,
             subject=prospect_subject,
@@ -693,3 +739,157 @@ async def send_meeting_email(
         )
 
     return results
+
+
+async def send_meeting_confirmation_broadcast(
+    employee_email: Optional[str],
+    customer_email: Optional[str],
+    lead_name: str,
+    meeting_time: str,
+    meeting_link: str,
+    title: str = "Sales Discovery Meeting",
+    agenda: str = "",
+    customer_phone: Optional[str] = None,
+    company_name: Optional[str] = None,
+    custom_message: Optional[str] = None,
+    employee_name: Optional[str] = None,
+    user_id: Optional[str] = None,
+    source: str = "calendar_confirmation",
+) -> dict:
+    """
+    Dedicated enterprise broadcast for calendar meeting confirmations:
+    1. Sends client meeting confirmation email to customer_email with custom text, meeting link, and meeting time.
+    2. Sends employee alert to employee_email (the company employee where login is done) alerting them of the meeting at the given time.
+    3. Sends executive alert to workspace owner if distinct from employee.
+    """
+    results: Dict[str, Any] = {"customer": None, "employee": None, "owner": None}
+    formatted_time = format_datetime_human(meeting_time)
+    comp_display = company_name or "VyaperiX"
+
+    # 1. Lead / Customer Email Dispatch
+    if customer_email and "@" in str(customer_email):
+        clean_cust_email = str(customer_email).strip()
+        cust_subject = f"Meeting Confirmed: {title} with {comp_display}"
+        cust_html = _render_meeting_html(
+            lead_name=lead_name,
+            meeting_time=meeting_time,
+            meeting_link=meeting_link,
+            title=title,
+            agenda=agenda,
+            customer_phone=customer_phone,
+            prospect_email=clean_cust_email,
+            company_name=comp_display,
+            recipient_type="customer",
+            source=source,
+            custom_message=custom_message,
+            employee_name=employee_name,
+            employee_email=employee_email,
+        )
+        cust_text_lines = [
+            f"Hello {lead_name}!",
+            "",
+            f"Your meeting with {comp_display} has been confirmed for {formatted_time}.",
+            "",
+            f"🎥 Join Live Video Meeting Room: {meeting_link}",
+            f"Topic: {title}",
+        ]
+        if custom_message:
+            cust_text_lines.extend(["", f"Note from {comp_display}:\n{custom_message}"])
+        elif agenda:
+            cust_text_lines.extend(["", f"Agenda:\n{agenda}"])
+
+        cust_text_lines.extend([
+            "",
+            "Please join 2 minutes early with your camera and mic enabled.",
+            f"— {comp_display} Team",
+        ])
+        results["customer"] = await send_email(
+            to_email=clean_cust_email,
+            subject=cust_subject,
+            html_content=cust_html,
+            text_content="\n".join(cust_text_lines),
+        )
+    else:
+        results["customer"] = {"status": "skipped", "reason": "No valid customer_email provided"}
+
+    # 2. Company Employee Email Dispatch (where login is done)
+    if employee_email and "@" in str(employee_email):
+        clean_emp_email = str(employee_email).strip()
+        emp_subject = f"📅 [Confirmed] Meeting with {lead_name} on {formatted_time} — {comp_display}"
+        emp_html = _render_meeting_html(
+            lead_name=lead_name,
+            meeting_time=meeting_time,
+            meeting_link=meeting_link,
+            title=title,
+            agenda=agenda,
+            customer_phone=customer_phone,
+            prospect_email=customer_email,
+            company_name=comp_display,
+            recipient_type="employee",
+            source=source,
+            custom_message=custom_message,
+            employee_name=employee_name,
+            employee_email=clean_emp_email,
+        )
+        emp_text_lines = [
+            f"MEETING CONFIRMED FOR {formatted_time.upper()}",
+            f"Client Name: {lead_name}",
+            f"Scheduled Date & Time: {formatted_time}",
+            f"Client Phone: {customer_phone or 'N/A'}",
+            f"Client Email: {customer_email or 'N/A'}",
+            f"Host Join Meeting Link: {meeting_link}",
+            f"Meeting Title: {title}",
+        ]
+        if custom_message:
+            emp_text_lines.extend(["", f"Custom Notes / Agenda:\n{custom_message}"])
+        elif agenda:
+            emp_text_lines.extend(["", f"Discussion Agenda:\n{agenda}"])
+
+        emp_text_lines.extend([
+            "",
+            "All attendee channels (Customer Email, WhatsApp Web & SMS) have been triggered.",
+            f"— VyaperiX Commercial Fleet",
+        ])
+        results["employee"] = await send_email(
+            to_email=clean_emp_email,
+            subject=emp_subject,
+            html_content=emp_html,
+            text_content="\n".join(emp_text_lines),
+        )
+    else:
+        results["employee"] = {"status": "skipped", "reason": "No valid employee_email resolved"}
+
+    # 3. Workspace Owner Alert (if different from logged-in employee)
+    try:
+        resolved_owner = await resolve_workspace_owner_email(user_id)
+        if (
+            resolved_owner
+            and "@" in resolved_owner
+            and (not employee_email or resolved_owner.strip().lower() != employee_email.strip().lower())
+        ):
+            owner_subject = f"📅 [Executive Alert] Meeting with {lead_name} on {formatted_time}"
+            owner_html = _render_meeting_html(
+                lead_name=lead_name,
+                meeting_time=meeting_time,
+                meeting_link=meeting_link,
+                title=title,
+                agenda=agenda,
+                customer_phone=customer_phone,
+                prospect_email=customer_email,
+                company_name=comp_display,
+                recipient_type="owner",
+                source=source,
+                custom_message=custom_message,
+                employee_name=employee_name,
+                employee_email=employee_email,
+            )
+            results["owner"] = await send_email(
+                to_email=resolved_owner,
+                subject=owner_subject,
+                html_content=owner_html,
+            )
+    except Exception as owner_err:
+        logger.debug(f"Optional owner email notice skipped: {owner_err}")
+
+    return results
+
