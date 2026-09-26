@@ -269,9 +269,9 @@ No conversational text.
                 )
                 resolved_email = (
                     c["emails"][0] if c["emails"]
-                    else (f"contact@{enrichment.get('domain')}" if enrichment.get("domain") else "contact@enterprise.com")
+                    else (enrichment.get("email") or "")
                 )
-                website = enrichment.get("website_url") or f"https://{c['domain_candidate']}"
+                website = enrichment.get("website_url") or (f"https://{c['domain_candidate']}" if c.get('domain_candidate') else "")
                 linkedin_url = enrichment.get("linkedin_url") or c["linkedin_url"]
                 twitter_url = enrichment.get("twitter_url") or ""
 

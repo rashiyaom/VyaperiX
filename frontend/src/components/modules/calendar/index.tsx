@@ -1564,7 +1564,7 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
       {/* ─────────────────── EVENT DETAIL MODAL ─────────────────── */}
       {selectedEvent && (
         <div className="fixed inset-0 z-50 bg-ink/70 flex items-center justify-center p-4 backdrop-blur-xs">
-          <div className="border border-ink bg-card max-w-lg w-full p-6 space-y-5 shadow-2xl relative">
+          <div className="border border-ink bg-card max-w-xl w-full p-6 space-y-5 shadow-2xl relative">
             <button
               onClick={() => setSelectedEvent(null)}
               className="absolute right-4 top-4 p-1 text-muted-foreground hover:text-ink hover:bg-secondary"
@@ -1728,73 +1728,78 @@ export function CalendarModule({ user, session, companyName }: CalendarModulePro
             )}
 
             {/* Bottom Modal Actions */}
-            <div className="flex items-center justify-between pt-2 border-t border-ink/20">
+            <div className="space-y-3 pt-3 border-t border-ink/20">
+              {/* Primary Action: Confirm & Dispatch */}
               <button
                 type="button"
-                onClick={() => handleDeleteEvent(selectedEvent.id)}
-                className="flex items-center gap-1 text-xs font-mono text-red-500 hover:text-red-700"
+                onClick={() => {
+                  setConfirmModalEvent(selectedEvent);
+                  setCustomMeetingText(selectedEvent.notes || selectedEvent.agenda || "");
+                }}
+                disabled={approvingId === selectedEvent.id}
+                className="w-full flex items-center justify-center gap-2 py-2.5 px-4 label-mono text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-md transition-all cursor-pointer active:scale-[0.99]"
+                title="Confirm meeting with custom text and dispatch Email, WhatsApp, SMS & Employee Alert"
               >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>Delete</span>
+                {approvingId === selectedEvent.id ? (
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Check className="w-4 h-4" />
+                )}
+                <span>{selectedEvent.status === "new_booking" ? "✓ Confirm & Send Multi-Channel Invites" : "Confirm & Dispatch All Channels"}</span>
               </button>
 
-              <div className="flex items-center gap-2">
+              {/* Secondary Actions Grid */}
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <button
                   type="button"
-                  onClick={() => {
-                    setConfirmModalEvent(selectedEvent);
-                    setCustomMeetingText(selectedEvent.notes || selectedEvent.agenda || "");
-                  }}
-                  disabled={approvingId === selectedEvent.id}
-                  className="flex items-center gap-1.5 px-4 py-2 label-mono text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition-all"
-                  title="Confirm meeting with custom text and dispatch Email, WhatsApp, SMS & Employee Alert"
+                  onClick={() => handleDeleteEvent(selectedEvent.id)}
+                  className="flex items-center gap-1 px-3 py-2 text-xs font-mono text-red-500 hover:text-red-700 hover:bg-red-500/10 border border-transparent hover:border-red-500/30 transition-all cursor-pointer"
+                  title="Delete this meeting from calendar"
                 >
-                  {approvingId === selectedEvent.id ? (
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <Check className="w-3.5 h-3.5" />
-                  )}
-                  <span>{selectedEvent.status === "new_booking" ? "✓ Confirm & Send Invites" : "Confirm & Dispatch All"}</span>
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Delete</span>
                 </button>
 
-                <button
-                  type="button"
-                  onClick={() => handleSendWhatsApp(selectedEvent.id, selectedEvent.customer_phone)}
-                  disabled={waSending}
-                  className="flex items-center gap-1.5 px-3 py-2 label-mono text-xs font-bold border border-lime/50 bg-lime/10 text-lime-800 dark:text-lime hover:bg-lime/20 transition-all"
-                  title="Dispatch WhatsApp meeting invite with live video link"
-                >
-                  <MessageSquare className="w-3.5 h-3.5 text-lime-600 dark:text-lime" />
-                  <span>{waSending ? "Sending..." : "WhatsApp"}</span>
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleSendWhatsApp(selectedEvent.id, selectedEvent.customer_phone)}
+                    disabled={waSending}
+                    className="flex items-center gap-1.5 px-3 py-2 label-mono text-xs font-bold border border-lime/50 bg-lime/10 text-lime-800 dark:text-lime hover:bg-lime/20 transition-all cursor-pointer"
+                    title="Dispatch WhatsApp meeting invite with live video link"
+                  >
+                    <MessageSquare className="w-3.5 h-3.5 text-lime-600 dark:text-lime" />
+                    <span>{waSending ? "Sending..." : "WhatsApp"}</span>
+                  </button>
 
-                <button
-                  type="button"
-                  onClick={() => handleSendMeetingEmail(selectedEvent.id, selectedEvent.customer_email)}
-                  disabled={emailSending}
-                  className="flex items-center gap-1.5 px-3 py-2 label-mono text-xs font-bold border border-violet/40 bg-violet/10 text-violet dark:text-violet-300 hover:bg-violet/20 transition-all"
-                  title="Send meeting confirmation email with live video link to registered login email and client"
-                >
-                  {emailSending ? (
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-violet" />
-                  ) : (
-                    <Mail className="w-3.5 h-3.5 text-violet" />
-                  )}
-                  <span>{emailSending ? "Sending..." : "Email"}</span>
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSendMeetingEmail(selectedEvent.id, selectedEvent.customer_email)}
+                    disabled={emailSending}
+                    className="flex items-center gap-1.5 px-3 py-2 label-mono text-xs font-bold border border-violet/40 bg-violet/10 text-violet dark:text-violet-300 hover:bg-violet/20 transition-all cursor-pointer"
+                    title="Send meeting confirmation email with live video link"
+                  >
+                    {emailSending ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin text-violet" />
+                    ) : (
+                      <Mail className="w-3.5 h-3.5 text-violet" />
+                    )}
+                    <span>{emailSending ? "Sending..." : "Email"}</span>
+                  </button>
 
-                <button
-                  type="button"
-                  onClick={(e) => handleMarkDone(e, selectedEvent.id, selectedEvent.status)}
-                  className={`flex items-center gap-1.5 px-4 py-2 label-mono text-xs font-bold border transition-all ${
-                    selectedEvent.status === "completed"
-                      ? "border-lime bg-lime text-lime-foreground"
-                      : "border-ink bg-ink text-paper hover:bg-violet hover:border-violet"
-                  }`}
-                >
-                  <Check className={`w-3.5 h-3.5 ${selectedEvent.status === "completed" ? "text-lime-foreground" : "text-paper"}`} />
-                  <span>{selectedEvent.status === "completed" ? "Done" : "Mark Done"}</span>
-                </button>
+                  <button
+                    type="button"
+                    onClick={(e) => handleMarkDone(e, selectedEvent.id, selectedEvent.status)}
+                    className={`flex items-center gap-1.5 px-3 py-2 label-mono text-xs font-bold border transition-all cursor-pointer ${
+                      selectedEvent.status === "completed"
+                        ? "border-lime bg-lime text-lime-foreground"
+                        : "border-ink bg-secondary hover:border-violet hover:text-violet text-ink"
+                    }`}
+                  >
+                    <Check className={`w-3.5 h-3.5 ${selectedEvent.status === "completed" ? "text-lime-foreground" : "text-ink"}`} />
+                    <span>{selectedEvent.status === "completed" ? "Done" : "Mark Done"}</span>
+                  </button>
+                </div>
               </div>
             </div>
           </div>

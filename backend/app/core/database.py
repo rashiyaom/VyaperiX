@@ -29,8 +29,8 @@ from supabase import Client, create_client
 
 try:
     import dns.resolver
-    dns.resolver.default_resolver = dns.resolver.Resolver(configure=False)
-    dns.resolver.default_resolver.nameservers = ['8.8.8.8', '1.1.1.1']
+    # Use system default DNS resolver for fast native SRV resolution
+    dns.resolver.default_resolver = dns.resolver.Resolver(configure=True)
 except Exception:
     pass
 

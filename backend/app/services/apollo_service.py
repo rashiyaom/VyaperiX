@@ -278,8 +278,8 @@ class ApolloService:
                                 tech_list.append(t)
 
                         domain = primary_domain
-                        contact_email = f"contact@{domain}" if domain else ""
-                        sales_email = f"sales@{domain}" if domain else ""
+                        contact_email = org.get("email") or org.get("corporate_email") or ""
+                        sales_email = org.get("sales_email") or ""
 
                         item = {
                             "found": True,

@@ -206,7 +206,8 @@ export function OverviewDashboard({
     }
     setLoading(true);
     const headers = getAuthHeaders(session?.access_token);
-    const uidParam = `user_id=${encodeURIComponent(validUserId)}`;
+    const emailParam = user?.email ? `&user_email=${encodeURIComponent(user.email.toLowerCase())}` : "";
+    const uidParam = `user_id=${encodeURIComponent(validUserId)}${emailParam}`;
     const [rpts, ldData, cls, evData, crmSt, crmRec] = await Promise.all([
       apiFetch(`/api/reports?${uidParam}`, headers),
       apiFetch(`/api/prospecting/leads?limit=100&${uidParam}`, headers),

@@ -2739,21 +2739,23 @@ export function VoiceFleetModule({
                   </div>
 
                   <div className="space-y-3">
-                    {selectedCall.transcript.map((turn, i) => (
+                    {selectedCall.transcript.map((turn, i) => {
+                      const isAgent = turn.speaker === "agent" || (turn as any).role === "assistant" || (turn as any).role === "agent" || (turn as any).speaker === "bot";
+                      return (
                       <div
                         key={i}
                         className={`p-3.5 space-y-1.5 border ${
-                          turn.speaker === "agent"
+                          isAgent
                             ? "border-violet/30 bg-violet/5 text-ink ml-6"
                             : "border-ink/15 bg-paper mr-6 text-ink"
                         }`}
                       >
                         <div className="flex items-center justify-between text-[10px] text-muted-foreground">
                           <span className="font-bold flex items-center gap-1.5">
-                            {turn.speaker === "agent" ? (
+                            {isAgent ? (
                               <>
                                 <Bot className="w-3.5 h-3.5 text-violet" /> AI Voice SDR (
-                                {selectedCall.business_name})
+                                {selectedCall.business_name || "Omkar Ceramics"})
                               </>
                             ) : (
                               <>
@@ -2782,7 +2784,8 @@ export function VoiceFleetModule({
                         </div>
                         <p className="leading-relaxed text-xs">{turn.message}</p>
                       </div>
-                    ))}
+                    );
+                  })}
                   </div>
                 </div>
               )}

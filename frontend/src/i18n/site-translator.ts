@@ -32,6 +32,7 @@ const textApplied = new WeakMap<Text, { orig: string; out: string }>();
 const attrApplied = new WeakMap<Element, Map<string, { orig: string; out: string }>>();
 
 let dict: Dict | null = null;
+let lowerDict: Map<string, string> = new Map();
 let observer: MutationObserver | null = null;
 let pending = new Set<Node>();
 let scheduled = false;
@@ -43,13 +44,40 @@ function skipped(el: Element | null): boolean {
   return !el || SKIP_TAGS.has(el.tagName) || !!el.closest('[translate="no"]');
 }
 
+function lookupTranslation(raw: string): string | null {
+  if (!dict) return null;
+  const n = norm(raw);
+  if (!n) return null;
+  
+  // 1. Direct exact match
+  if (dict[n]) return dict[n];
+  
+  // 2. Direct lowercase match
+  const low = n.toLowerCase();
+  const directLow = lowerDict.get(low);
+  if (directLow) return directLow;
+  
+  // 3. Strip leading/trailing slashes, brackets, badges, bullets, arrows, emojis (e.g. "/OVERVIEW", "[APOLLO.IO]", "✓ CONFIRM", "• Active")
+  const stripped = n.replace(/^([\/\s\[\(\{\-•·→←↑↓✓⚡📍📞✉️🏢🌐🛡️🎯🤖⚠️📊🔥⭐✨›»«|:]+)/u, "").replace(/([\/\s\]\)\}\-•·→←↑↓✓⚡📍📞✉️🏢🌐🛡️🎯🤖⚠️📊🔥⭐✨›»«|:\.]+)$/u, "");
+  if (stripped && stripped !== n) {
+    const sub = dict[stripped] || lowerDict.get(stripped.toLowerCase());
+    if (sub) {
+      const pIdx = n.indexOf(stripped);
+      const prefix = n.slice(0, pIdx);
+      const suffix = n.slice(pIdx + stripped.length);
+      return prefix + sub + suffix;
+    }
+  }
+  return null;
+}
+
 function translateText(node: Text) {
   if (!dict) return;
   const cur = node.nodeValue ?? "";
   const prev = textApplied.get(node);
   if (prev && cur === prev.out) return; // our own write
   if (skipped(node.parentElement)) return;
-  const out = dict[norm(cur)];
+  const out = lookupTranslation(cur);
   if (!out) {
     textApplied.delete(node);
     return;
@@ -69,7 +97,7 @@ function translateAttrs(el: Element) {
     const map = attrApplied.get(el) ?? new Map();
     const prev = map.get(a);
     if (prev && cur === prev.out) continue;
-    const out = dict[norm(cur)];
+    const out = lookupTranslation(cur);
     if (!out) {
       map.delete(a);
       continue;
@@ -158,6 +186,10 @@ export async function applySiteLanguage(lang: SiteLangCode): Promise<void> {
   const loaded = await loadDict(lang);
   if (gen !== generation || !loaded) return; // superseded, or no dictionary shipped for this language
   dict = loaded;
+  lowerDict = new Map();
+  for (const [k, v] of Object.entries(loaded)) {
+    lowerDict.set(k.toLowerCase(), v);
+  }
 
   walk(document.body, translateText, translateAttrs);
   observer = new MutationObserver(onMutations);
