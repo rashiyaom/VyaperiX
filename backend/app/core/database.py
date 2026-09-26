@@ -81,6 +81,12 @@ def get_mongo_client() -> AsyncIOMotorClient:
         kwargs: Dict[str, Any] = {
             "serverSelectionTimeoutMS": 10000,
             "connectTimeoutMS": 10000,
+            "socketTimeoutMS": 20000,
+            "maxPoolSize": 50,
+            "minPoolSize": 5,
+            "maxIdleTimeMS": 45000,
+            "retryWrites": True,
+            "retryReads": True,
         }
         if "mongodb+srv://" in uri or "ssl=true" in uri.lower():
             try:
@@ -129,13 +135,23 @@ async def save_chat_answer(key: str, report_id: str, answer: dict) -> dict:
         raise RuntimeError("Chat answer cache is unavailable") from exc
 
 def _clean_doc(doc: Optional[dict]) -> Optional[dict]:
-    """Convert MongoDB _id to string or remove it so output is clean JSON."""
+    """Recursively convert MongoDB ObjectId to string and datetime to ISO format so output is clean JSON."""
     if not doc:
         return None
-    d = dict(doc)
-    if "_id" in d:
-        d["_id"] = str(d["_id"])
-    return d
+    from bson import ObjectId
+
+    def _sanitize(val: Any) -> Any:
+        if isinstance(val, ObjectId):
+            return str(val)
+        if isinstance(val, datetime):
+            return val.isoformat()
+        if isinstance(val, dict):
+            return {k: _sanitize(v) for k, v in val.items()}
+        if isinstance(val, list):
+            return [_sanitize(x) for x in val]
+        return val
+
+    return _sanitize(dict(doc))
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -251,7 +267,15 @@ async def init_db():
             await _mongo_db["blocklist"].create_index("status", background=True)
             await _mongo_db["blocklist"].create_index("created_at", background=True)
             await _mongo_db["guardrail_settings"].create_index("user_id", background=True)
-            logger.info("MongoDB collection indexes verified.")
+            await _mongo_db["prospect_leads"].create_index("user_id", background=True)
+            await _mongo_db["prospect_leads"].create_index("id", unique=True, background=True)
+            await _mongo_db["crm_records"].create_index("user_id", background=True)
+            await _mongo_db["crm_records"].create_index("id", unique=True, background=True)
+            await _mongo_db["crm_settings"].create_index("user_id", background=True)
+            await _mongo_db["voice_campaigns"].create_index("user_id", background=True)
+            await _mongo_db["voice_campaigns"].create_index("id", unique=True, background=True)
+            await _mongo_db["chat_answers"].create_index("report_id", background=True)
+            logger.info("MongoDB collection indexes verified across all collections.")
         except Exception as idx_err:
             logger.warning(f"Note on MongoDB index creation: {idx_err}")
     else:
