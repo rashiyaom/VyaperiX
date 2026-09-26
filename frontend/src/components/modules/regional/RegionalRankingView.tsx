@@ -45,6 +45,9 @@ export interface RegionData {
   priority: "CRITICAL" | "HIGH" | "MODERATE" | "STABLE";
   priority_label: string;
   priority_badge: string;
+  ranking_reason?: string;
+  commercial_driver?: string;
+  hub_profile?: string;
   weather: {
     temperature: number;
     humidity: number;
@@ -461,7 +464,25 @@ export function RegionalRankingView({
                 </div>
               </div>
 
-              {/* Weather & News Trigger Box */}
+              {/* Commercial Ranking Rationale (Groq Curated) */}
+              <div className="p-3.5 rounded-xl bg-neutral-950/90 border border-lime-400/20 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-mono text-lime-400 font-bold uppercase tracking-wider flex items-center gap-1.5">
+                    <Brain className="w-3.5 h-3.5 text-lime-400" />
+                    Commercial Ranking Rationale
+                  </span>
+                  {selectedRegion.commercial_driver && (
+                    <span className="text-[10px] font-mono text-lime-300 bg-lime-400/10 px-2.5 py-0.5 rounded border border-lime-400/20 truncate max-w-[220px] font-bold">
+                      {selectedRegion.commercial_driver}
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-neutral-200 leading-relaxed font-sans">
+                  {selectedRegion.ranking_reason || `${selectedRegion.city} ranks with high commercial priority based on its industrial hub profile and local market readiness.`}
+                </p>
+              </div>
+
+              {/* Weather & News Telemetry Box */}
               <div className="p-3.5 rounded-xl bg-neutral-950/70 border border-ink/15 space-y-2.5">
                 <div className="flex items-center gap-4 text-xs">
                   <div className="flex items-center gap-1.5 text-neutral-300">
@@ -478,7 +499,7 @@ export function RegionalRankingView({
                 </div>
 
                 <div className="text-xs text-neutral-300 flex items-start gap-2 pt-1 border-t border-ink/10">
-                  <span className="text-amber-400 font-mono text-[11px] shrink-0 font-bold">EVENT TRIGGER:</span>
+                  <span className="text-neutral-400 font-mono text-[11px] shrink-0 font-bold">OPERATIONAL CLIMATE:</span>
                   <span className="italic leading-relaxed">{selectedRegion.weather.summary}</span>
                 </div>
 
@@ -632,8 +653,8 @@ export function RegionalRankingView({
                               {reg.state.split("/")[0]}
                             </span>
                           </div>
-                          <div className="text-[11px] text-neutral-400 truncate max-w-[200px]">
-                            {reg.weather.summary}
+                          <div className="text-[11px] text-neutral-300 truncate max-w-[210px]">
+                            {reg.commercial_driver || reg.ranking_reason || reg.weather.summary}
                           </div>
                         </div>
                       </div>

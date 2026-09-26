@@ -212,6 +212,7 @@ _in_memory_profiles: Dict[str, dict] = {}
 _in_memory_voice_settings: Dict[str, str] = {}
 _in_memory_blocklist: Dict[str, dict] = {}
 _in_memory_guardrail_settings: Dict[str, dict] = {}
+_in_memory_regional_rankings: Dict[str, dict] = {}
 
 # ─────────────────────────── Startup Initialization ──────────────────────
 
@@ -275,6 +276,8 @@ async def init_db():
             await _mongo_db["voice_campaigns"].create_index("user_id", background=True)
             await _mongo_db["voice_campaigns"].create_index("id", unique=True, background=True)
             await _mongo_db["chat_answers"].create_index("report_id", background=True)
+            await _mongo_db["regional_rankings"].create_index("cache_key", unique=True, background=True)
+            await _mongo_db["regional_rankings"].create_index("expires_at_ts", background=True)
             logger.info("MongoDB collection indexes verified across all collections.")
         except Exception as idx_err:
             logger.warning(f"Note on MongoDB index creation: {idx_err}")
@@ -1702,3 +1705,67 @@ async def update_guardrail_settings(updates: dict, user_id: Optional[str] = None
             logger.warning(f"MongoDB update_guardrail_settings error: {e}")
 
     return current
+
+
+# ─────────────────────────── Regional Rankings Cache (MongoDB) ────────────
+
+async def get_cached_regional_rankings(cache_key: str) -> Optional[dict]:
+    """Retrieve cached regional ranking intelligence from MongoDB Atlas or memory."""
+    clean_key = cache_key.strip().lower()
+    now_ts = datetime.now(timezone.utc).timestamp()
+
+    if _mongo_connected:
+        try:
+            db = get_mongo_db()
+            doc = await db["regional_rankings"].find_one({"cache_key": clean_key})
+            if doc:
+                exp_ts = doc.get("expires_at_ts")
+                if exp_ts and now_ts > float(exp_ts):
+                    return None
+                cleaned = _clean_doc(doc)
+                if cleaned and "data" in cleaned:
+                    return cleaned["data"]
+        except Exception as e:
+            logger.debug(f"MongoDB get_cached_regional_rankings error: {e}")
+
+    cached = _in_memory_regional_rankings.get(clean_key)
+    if cached:
+        if now_ts < cached.get("expires_at_ts", 0):
+            return cached.get("data")
+        _in_memory_regional_rankings.pop(clean_key, None)
+
+    return None
+
+
+async def save_cached_regional_rankings(
+    cache_key: str, data: dict, ttl_seconds: int = 21600
+) -> bool:
+    """Save regional ranking intelligence to MongoDB Atlas and memory (default 6h TTL)."""
+    clean_key = cache_key.strip().lower()
+    now = datetime.now(timezone.utc)
+    expires_at_ts = now.timestamp() + ttl_seconds
+    expires_at_iso = datetime.fromtimestamp(expires_at_ts, tz=timezone.utc).isoformat()
+
+    record = {
+        "cache_key": clean_key,
+        "data": data,
+        "updated_at": now.isoformat(),
+        "expires_at_ts": expires_at_ts,
+        "expires_at_iso": expires_at_iso,
+    }
+
+    _in_memory_regional_rankings[clean_key] = record
+
+    if _mongo_connected:
+        try:
+            db = get_mongo_db()
+            await db["regional_rankings"].update_one(
+                {"cache_key": clean_key},
+                {"$set": record},
+                upsert=True,
+            )
+            return True
+        except Exception as e:
+            logger.debug(f"MongoDB save_cached_regional_rankings error: {e}")
+
+    return False

@@ -145,7 +145,7 @@ export function RegionalRankingTile({
                       {isHot && <Flame className="w-3 h-3 text-red-500 fill-red-500 shrink-0" />}
                     </div>
                     <div className="text-[10px] text-neutral-400 truncate max-w-[170px]">
-                      {reg.weather.summary}
+                      {reg.commercial_driver || reg.ranking_reason || reg.weather.summary}
                     </div>
                   </div>
                 </div>
