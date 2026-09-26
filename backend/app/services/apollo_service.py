@@ -204,7 +204,28 @@ class ApolloService:
             return []
 
         keyword_list = [keywords] if isinstance(keywords, str) else list(keywords or [])
-        tags = [k.strip() for k in keyword_list if k and len(k.strip()) > 1][:4]
+        clean_tags: List[str] = []
+        for k in keyword_list:
+            if not k:
+                continue
+            parts = re.split(r"[,&/|]+|\band\b", str(k), flags=re.IGNORECASE)
+            for p in parts:
+                p_clean = p.strip()
+                if len(p_clean) > 1 and p_clean.lower() not in ("b2b", "commercial", "enterprise", "solutions"):
+                    clean_tags.append(p_clean)
+
+        tags = list(dict.fromkeys(clean_tags))[:6]
+
+        norm_location = None
+        if location and str(location).strip():
+            raw_loc = str(location).strip()
+            low_loc = raw_loc.lower()
+            if any(term in low_loc for term in ["pan-india", "all india", "national", "pan india", "bharat"]):
+                norm_location = "India"
+            elif low_loc in ("global", "worldwide", "any", "all", "none"):
+                norm_location = None
+            else:
+                norm_location = raw_loc
 
         url = f"{APOLLO_API_BASE}/organizations/search"
         headers = {
@@ -215,12 +236,12 @@ class ApolloService:
 
         payload: Dict[str, Any] = {
             "page": 1,
-            "per_page": min(max(limit, 3), 25),
+            "per_page": min(max(limit, 5), 25),
         }
         if tags:
             payload["q_organization_keyword_tags"] = tags
-        if location and location.strip() and location.strip().lower() != "global":
-            payload["organization_locations"] = [location.strip()]
+        if norm_location:
+            payload["organization_locations"] = [norm_location]
 
         try:
             async with httpx.AsyncClient(timeout=12.0) as client:

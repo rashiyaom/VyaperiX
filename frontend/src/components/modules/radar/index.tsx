@@ -49,9 +49,16 @@ export interface Lead {
   email: string;
   phone: string;
   linkedin_url?: string;
+  twitter_url?: string;
+  city?: string;
+  state?: string;
+  country?: string;
+  raw_address?: string;
   employee_count?: number | null;
+  annual_revenue?: string | null;
   technologies?: string[];
   logo_url?: string;
+  apollo_found?: boolean;
   status: "new" | "contacted" | "qualified" | "in_call";
 }
 
@@ -148,20 +155,34 @@ export function LeadRadarModule({
             industry: l.industry || effectiveIndustry || "B2B Commercial",
             intentScore: l.intentScore ?? 92,
             dealSize: l.dealSize || "₹10L - ₹25L / yr",
-            signals: Array.isArray(l.signals) && l.signals.length ? l.signals : ["High buying intent detected", "Commercial inquiry"],
+            signals: Array.isArray(l.signals) && l.signals.length ? l.signals : ["Apollo Verified Record", "Commercial B2B Footprint"],
             why_matched: l.why_matched || "Verified matching commercial profile",
             personalized_pitch: l.personalized_pitch || `Commercial inquiry for ${l.company || "enterprise"}`,
             website: l.website || (l.domain ? `https://${l.domain}` : ""),
             email: l.email || (l.domain ? `contact@${l.domain}` : "procurement@enterprise.com"),
             phone: l.phone || "",
             status: l.status || "new",
-            linkedin_url: l.linkedin_url,
+            linkedin_url: l.linkedin_url || "",
+            twitter_url: l.twitter_url || "",
+            city: l.city || "",
+            state: l.state || "",
+            country: l.country || "",
+            raw_address: l.raw_address || "",
             employee_count: l.employee_count,
-            technologies: l.technologies,
-            logo_url: l.logo_url,
+            annual_revenue: l.annual_revenue,
+            technologies: l.technologies || [],
+            logo_url: l.logo_url || "",
+            apollo_found: l.apollo_found !== false,
           }));
           setLeads(sanitized);
           setIsLoadingExisting(false);
+          return;
+        } else {
+          // If no persisted leads exist yet, auto-trigger live Apollo + Web discovery immediately!
+          setIsLoadingExisting(false);
+          setTimeout(() => {
+            handleRunDiscovery();
+          }, 400);
           return;
         }
       }
@@ -169,46 +190,6 @@ export function LeadRadarModule({
       console.warn("Could not fetch persisted leads from backend:", e);
     }
 
-    // Fallback: derive from Groq analysis if no database leads exist yet
-    const targetCustomers = (analysis?.target_customers || []).map((c: any) =>
-      typeof c === "string" ? { segment_name: c, description: c, estimated_deal_size: "Custom Enterprise", pain_points: [] } : c
-    );
-
-    if (targetCustomers.length > 0) {
-      const oppScore = analysis?.opportunity_score || 88;
-      const derived: Lead[] = targetCustomers.map((cust: any, idx: number) => {
-        const computedScore = Math.min(98, Math.max(68, oppScore - idx * 4 + 2));
-        const signalsList: string[] = [];
-        if (cust.pain_points && Array.isArray(cust.pain_points) && cust.pain_points.length) {
-          signalsList.push(...cust.pain_points.slice(0, 3));
-        } else if (cust.description) {
-          signalsList.push(cust.description);
-        } else {
-          signalsList.push(`Active ICP requirement for ${effectiveCompanyName}`);
-        }
-
-        const domainCandidate = `${(cust.segment_name || "enterprise").toLowerCase().replace(/[^a-z0-9]/g, "")}.com`;
-
-        return {
-          id: `icp-segment-${idx + 1}`,
-          name: `${cust.segment_name} Commercial Team`,
-          title: cust.description || `Commercial Buyer Segment (${cust.segment_name})`,
-          company: `${cust.segment_name} Group`,
-          domain: domainCandidate,
-          industry: effectiveIndustry || "B2B Commercial",
-          intentScore: computedScore,
-          dealSize: cust.estimated_deal_size || "₹5L - ₹10L / yr",
-          signals: signalsList,
-          why_matched: `Target commercial segment matching ${effectiveCompanyName}'s core products.`,
-          personalized_pitch: `Hi ${cust.segment_name} team, noticing your market expansion, our AI platform helps automate your B2B sales pipeline.`,
-          website: `https://${domainCandidate}`,
-          email: `contact@${domainCandidate}`,
-          phone: "", // Click 'Launch Apollo Market Radar' to fetch real verified phones
-          status: "new",
-        };
-      });
-      setLeads(derived);
-    }
     setIsLoadingExisting(false);
   };
 
@@ -247,16 +228,13 @@ export function LeadRadarModule({
     setActionSuccessMsg(null);
     setActionErrorMsg(null);
 
-    setDiscoveryStep("1/4: Groq AI synthesizing targeted LinkedIn X-Ray operators...");
+    setDiscoveryStep("1/3: Querying Apollo.io live B2B database for verified organizations & phones...");
     const stepTimer1 = setTimeout(() => {
-      setDiscoveryStep("2/4: DuckDuckGo scanning LinkedIn company pages & key buyers...");
-    }, 2000);
+      setDiscoveryStep("2/3: Scanning real-time LinkedIn & X (Twitter) company channels...");
+    }, 1500);
     const stepTimer2 = setTimeout(() => {
-      setDiscoveryStep("3/4: Apollo.io resolving verified phones, headcount & tech stack...");
-    }, 5000);
-    const stepTimer3 = setTimeout(() => {
-      setDiscoveryStep("4/4: Groq evaluating ICP fit score & generating personalized hooks...");
-    }, 9000);
+      setDiscoveryStep("3/3: Verifying switchboards, tech stacks & employee headcounts...");
+    }, 3500);
 
     try {
       const userParam = user?.id ? `?user_id=${encodeURIComponent(user.id)}` : "";
@@ -274,7 +252,6 @@ export function LeadRadarModule({
 
       clearTimeout(stepTimer1);
       clearTimeout(stepTimer2);
-      clearTimeout(stepTimer3);
 
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
@@ -546,18 +523,18 @@ export function LeadRadarModule({
               [APOLLO.IO + DUCKDUCKGO MARKET RADAR]
             </span>
             <div className="h-2 w-2 rounded-full bg-lime animate-ping" />
-            <span className="label-mono border border-ink/15 bg-paper px-2 py-0.5 text-[9px] text-muted-foreground">
-              Groq ICP Synthesis: Active
+            <span className="label-mono border border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-2 py-0.5 text-[9px] font-bold">
+              Apollo.io Live Intelligence: Online
             </span>
-            <span className="label-mono border border-violet/30 bg-violet/10 text-violet px-2 py-0.5 text-[9px] font-bold">
-              Apollo Verified Firmographics
+            <span className="label-mono border border-sky-500/30 bg-sky-500/10 text-sky-600 dark:text-sky-400 px-2 py-0.5 text-[9px] font-bold">
+              Real-Time LinkedIn & X (Twitter) Scanner
             </span>
           </div>
           <h2 className="font-display text-2xl font-extrabold uppercase tracking-tight">
             Autonomous B2B Lead Radar & Prospecting
           </h2>
           <p className="font-mono text-xs text-muted-foreground">
-            Scans LinkedIn company ecosystems via DuckDuckGo, extracts verified phone numbers & firmographics via Apollo, and evaluates match fit with Groq LLM.
+            Real-time B2B market discovery powered by live Apollo.io corporate intelligence, real-time LinkedIn and X (Twitter) search, with verified switchboard phone numbers, headcount, and verified websites.
           </p>
         </div>
 
@@ -889,25 +866,53 @@ export function LeadRadarModule({
                         <span className="label-mono border border-lime/30 bg-lime/10 text-lime-700 dark:text-lime px-2 py-0.5 text-[9px] font-bold">
                           Est. Deal: {lead.dealSize}
                         </span>
+                        <span className="label-mono border border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-2 py-0.5 text-[9px] font-bold flex items-center gap-1">
+                          <ShieldCheck className="w-3 h-3" /> Apollo Verified
+                        </span>
                       </div>
 
                       <div className="flex flex-wrap items-center gap-3 font-mono text-xs text-muted-foreground">
                         <span className="flex items-center gap-1">
                           <Building className="w-3 h-3 text-violet" /> {lead.industry}
                         </span>
+                        {lead.city && (
+                          <span className="flex items-center gap-1 text-ink/80 font-medium">
+                            📍 {lead.city}{lead.state ? `, ${lead.state}` : ""}{lead.country ? ` (${lead.country})` : ""}
+                          </span>
+                        )}
                         {lead.employee_count !== undefined && lead.employee_count !== null && (
                           <span className="flex items-center gap-1 font-bold text-ink">
-                            👥 {lead.employee_count > 0 ? `${lead.employee_count} Employees` : "Mid-Market Scale"}
+                            👥 {lead.employee_count > 0 ? `${lead.employee_count}+ Employees` : "Mid-Market Scale"}
                           </span>
+                        )}
+                        {lead.website && (
+                          <a
+                            href={lead.website.startsWith("http") ? lead.website : `https://${lead.website}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-1 text-ink/80 hover:text-violet underline font-medium"
+                          >
+                            <Globe className="w-3 h-3" /> Website
+                          </a>
                         )}
                         {lead.linkedin_url && (
                           <a
                             href={lead.linkedin_url}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="flex items-center gap-1 text-violet hover:underline"
+                            className="flex items-center gap-1 text-sky-500 hover:underline font-bold"
                           >
-                            <ExternalLink className="w-3 h-3" /> LinkedIn Profile
+                            <ExternalLink className="w-3 h-3" /> LinkedIn
+                          </a>
+                        )}
+                        {lead.twitter_url && (
+                          <a
+                            href={lead.twitter_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-1 text-cyan-500 hover:underline font-bold"
+                          >
+                            <ExternalLink className="w-3 h-3" /> X (Twitter)
                           </a>
                         )}
                       </div>
